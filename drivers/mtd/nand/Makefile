@@ -50,5 +50,8 @@ obj-$(CONFIG_MTD_NAND_JZ4740)		+= jz4740_nand.o
 obj-$(CONFIG_MTD_NAND_GPMI_NAND)	+= gpmi-nand/
 obj-$(CONFIG_MTD_NAND_XWAY)		+= xway_nand.o
 obj-$(CONFIG_MTD_NAND_BCM47XXNFLASH)	+= bcm47xxnflash/
+obj-$(CONFIG_98C_NAND_FLASH)		+= rtknflash/
+obj-$(CONFIG_SPI_NAND_FLASH)		+= rtkn_nand/
+obj-$(CONFIG_PARALLEL_NAND_FLASH)	+= rtkn_nand/
 
 nand-objs := nand_base.o nand_bbt.o

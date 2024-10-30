@@ -4,6 +4,26 @@
 
 comment "MMC/SD/SDIO Host Controller Drivers"
 
+menuconfig MMC_RTK_SDMMC
+    tristate "Realtek SD/MMC host driver"
+    help
+      Realtek SD/MMC host support.
+      
+config MMC_RTK_SDMMC_DEBUG
+    bool  "Enable Realtek SD/MMC host driver debug message."
+    depends on MMC_RTK_SDMMC
+    default n
+        help
+          Enable Realtek SD/MMC host driver debug message.
+
+config MMC_RTK_SDMMC_DISABLE_UHS
+	bool  "Disable Realtek SD driver Ultra High Speed support"
+	depends on MMC_RTK_SDMMC	
+	default n
+		help
+			Disable Realtek SD driver Ultra High Speed support
+
+
 config MMC_ARMMMCI
 	tristate "ARM AMBA Multimedia Card Interface support"
 	depends on ARM_AMBA

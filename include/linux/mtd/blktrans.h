@@ -44,7 +44,8 @@ struct mtd_blktrans_dev {
 	struct kref ref;
 	struct gendisk *disk;
 	struct attribute_group *disk_attributes;
-	struct workqueue_struct *wq;
+//	struct workqueue_struct *wq;
+	struct task_struct *thread;
 	struct work_struct work;
 	struct request_queue *rq;
 	spinlock_t queue_lock;

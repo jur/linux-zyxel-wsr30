@@ -29,6 +29,12 @@
 #include <crypto/rng.h>
 
 #include "internal.h"
+#ifdef CONFIG_CRYPTO_DEV_REALTEK_TEST
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl_glue.h>
+
+#include "../drivers/crypto/realtek/crypto_engine/rtl_ipsec.h"
+#endif // CONFIG_CRYPTO_DEV_REALTEK
 
 #ifdef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
 
@@ -1467,9 +1473,10 @@ static int alg_test_skcipher(const struct alg_test_desc *desc,
 {
 	struct crypto_ablkcipher *tfm;
 	int err = 0;
-
+	SMP_LOCK_IPSEC;
 	tfm = crypto_alloc_ablkcipher(driver, type, mask);
 	if (IS_ERR(tfm)) {
+		SMP_UNLOCK_IPSEC;
 		printk(KERN_ERR "alg: skcipher: Failed to load transform for "
 		       "%s: %ld\n", driver, PTR_ERR(tfm));
 		return PTR_ERR(tfm);
@@ -1488,6 +1495,7 @@ static int alg_test_skcipher(const struct alg_test_desc *desc,
 
 out:
 	crypto_free_ablkcipher(tfm);
+	SMP_UNLOCK_IPSEC;
 	return err;
 }
 
@@ -1540,9 +1548,10 @@ static int alg_test_hash(const struct alg_test_desc *desc, const char *driver,
 {
 	struct crypto_ahash *tfm;
 	int err;
-
+	SMP_LOCK_IPSEC;
 	tfm = crypto_alloc_ahash(driver, type, mask);
 	if (IS_ERR(tfm)) {
+		SMP_UNLOCK_IPSEC;	
 		printk(KERN_ERR "alg: hash: Failed to load transform for %s: "
 		       "%ld\n", driver, PTR_ERR(tfm));
 		return PTR_ERR(tfm);
@@ -1555,6 +1564,7 @@ static int alg_test_hash(const struct alg_test_desc *desc, const char *driver,
 				desc->suite.hash.count, false);
 
 	crypto_free_ahash(tfm);
+	SMP_UNLOCK_IPSEC;	
 	return err;
 }
 

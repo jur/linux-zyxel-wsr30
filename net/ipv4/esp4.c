@@ -17,6 +17,33 @@
 #include <net/icmp.h>
 #include <net/protocol.h>
 #include <net/udp.h>
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl_glue.h>
+
+#include "../../drivers/crypto/realtek/crypto_engine/rtl_ipsec.h"
+//#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
+#endif // CONFIG_CRYPTO_DEV_REALTEK
+extern int lock_ipsec_owner;
+extern spinlock_t lock_ipsec_engine;
+
+#if !defined(CONFIG_CRYPTO_DEV_REALTEK)
+#define SMP_LOCK_IPSEC \
+do { \
+} while(0)
+
+#define SMP_LOCK_BH_IPSEC \
+do { \
+} while(0)
+
+#define SMP_UNLOCK_BH_IPSEC \
+do { \
+} while(0)
+
+#define SMP_UNLOCK_IPSEC \
+do { \
+} while(0)
+#endif
 
 struct esp_skb_cb {
 	struct xfrm_skb_cb xfrm;
@@ -138,7 +165,7 @@ static int esp_output(struct xfrm_state *x, struct sk_buff *skb)
 	__be32 *seqhi;
 
 	/* skb is pure payload to encrypt */
-
+	SMP_LOCK_BH_IPSEC;
 	esp = x->data;
 	aead = esp->aead;
 	alen = crypto_aead_authsize(aead);
@@ -273,6 +300,7 @@ static int esp_output(struct xfrm_state *x, struct sk_buff *skb)
 	kfree(tmp);
 
 error:
+	SMP_UNLOCK_BH_IPSEC;
 	return err;
 }
 
@@ -391,7 +419,8 @@ static int esp_input(struct xfrm_state *x, struct sk_buff *skb)
 	struct scatterlist *sg;
 	struct scatterlist *asg;
 	int err = -EINVAL;
-
+	
+	SMP_LOCK_IPSEC;
 	if (!pskb_may_pull(skb, sizeof(*esph) + crypto_aead_ivsize(aead)))
 		goto out;
 
@@ -401,7 +430,6 @@ static int esp_input(struct xfrm_state *x, struct sk_buff *skb)
 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
 		goto out;
 	nfrags = err;
-
 	assoclen = sizeof(*esph);
 	sglists = 1;
 	seqhilen = 0;
@@ -454,6 +482,7 @@ static int esp_input(struct xfrm_state *x, struct sk_buff *skb)
 	err = esp_input_done2(skb, err);
 
 out:
+	SMP_UNLOCK_IPSEC;
 	return err;
 }
 

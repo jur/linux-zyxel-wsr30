@@ -534,8 +534,11 @@ static void __build_flow_key(struct flowi4 *fl4, const struct sock *sk,
 			   iph->daddr, iph->saddr, 0, 0);
 }
 
-static void build_skb_flow_key(struct flowi4 *fl4, const struct sk_buff *skb,
-			       const struct sock *sk)
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+void build_skb_flow_key(struct flowi4 *fl4, const struct sk_buff *skb, const struct sock *sk)
+#else
+static void build_skb_flow_key(struct flowi4 *fl4, const struct sk_buff *skb, const struct sock *sk)
+#endif
 {
 	const struct iphdr *iph = ip_hdr(skb);
 	int oif = skb->dev->ifindex;
@@ -1782,6 +1785,29 @@ martian_source_keep_err:
 	goto out;
 }
 
+#if defined(CONFIG_RTL_IGMP_PROXY)
+struct mr_table {
+	struct list_head	list;
+#ifdef CONFIG_NET_NS
+	struct net		*net;
+#endif
+	u32			id;
+	struct sock __rcu	*mroute_sk;
+	struct timer_list	ipmr_expire_timer;
+	struct list_head	mfc_unres_queue;
+	struct list_head	mfc_cache_array[MFC_LINES];
+	struct vif_device	vif_table[MAXVIFS];
+	int			maxvif;
+	atomic_t		cache_resolve_queue_len;
+	int			mroute_do_assert;
+	int			mroute_do_pim;
+#if defined(CONFIG_IP_PIMSM_V1) || defined(CONFIG_IP_PIMSM_V2)
+	int			mroute_reg_vif_num;
+#endif
+};
+
+#endif
+
 int ip_route_input_noref(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			 u8 tos, struct net_device *dev)
 {
@@ -1806,6 +1832,13 @@ int ip_route_input_noref(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		if (in_dev) {
 			int our = ip_check_mc_rcu(in_dev, daddr, saddr,
 						  ip_hdr(skb)->protocol);
+#if defined (CONFIG_RTL_IGMP_PROXY) && defined (CONFIG_IP_MROUTE)
+			struct net *net = dev_net(dev);
+			if(rcu_dereference(net->ipv4.mrt->mroute_sk))
+			{
+				our = 1;
+			}
+#endif
 			if (our
 #ifdef CONFIG_IP_MROUTE
 				||

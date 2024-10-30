@@ -976,16 +976,20 @@ static int handle_exit(void)
 		}
 		/* fall through */
 	case -1:
+#if 0
 		printf(_("\n\n"
 			 "*** End of the configuration.\n"
 			 "*** Execute 'make' to start the build or try 'make help'."
 			 "\n\n"));
+#endif
 		res = 0;
 		break;
 	default:
+#if 0
 		fprintf(stderr, _("\n\n"
 				  "Your configuration changes were NOT saved."
 				  "\n\n"));
+#endif
 		if (res != KEY_ESC)
 			res = 0;
 	}

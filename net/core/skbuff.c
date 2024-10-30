@@ -73,6 +73,16 @@
 #include <trace/events/skb.h>
 #include <linux/highmem.h>
 
+#if defined(CONFIG_RTL_ETH_PRIV_SKB)
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl_nic.h>
+#endif
+
+#ifdef CONFIG_RTL8190_PRIV_SKB
+extern int is_rtl8190_priv_buf(unsigned char *head);
+extern void free_rtl8190_priv_buf(unsigned char *head);
+#endif
+
 struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
 
@@ -221,7 +231,12 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	 * aligned memory blocks, unless SLUB/SLAB debug is enabled.
 	 * Both skb->head and skb_shared_info are cache line aligned.
 	 */
+ #if defined(CONFIG_RTL_819X) || defined(CONFIG_RTL8192CD) || defined(CONFIG_RTL8190) || defined(CONFIG_RTL8192SE)
+	size = SKB_DATA_ALIGN(size+RTL_PRIV_DATA_SIZE);
+#else
 	size = SKB_DATA_ALIGN(size);
+#endif
+
 	size += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	data = kmalloc_reserve(size, gfp_mask, node, &pfmemalloc);
 	if (!data)
@@ -252,6 +267,66 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	skb->transport_header = ~0U;
 #endif
 
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	skb->from_dev = NULL;
+	skb->vlan_member = 0;
+#endif
+
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	skb->switch_port = NULL;
+#endif
+
+#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
+	skb->passThruFlag = 0;
+#endif
+
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) ||defined(CONFIG_RTL_QOS_VLANID_SUPPORT) || defined (CONFIG_RTL_VLAN_8021Q)
+	skb->srcPort=0xFFFF;
+	skb->srcVlanId=0;
+#endif
+
+#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
+	skb->srcVlanPriority=0;
+#endif
+
+#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)			
+	skb->original_dscp=0;
+ #endif
+
+ #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
+ 	skb->original_vlanpri=0;
+ #endif
+
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+	skb->inDev=NULL;
+#endif
+
+#if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH)|| defined(CONFIG_RTK_VOIP_QOS) || defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN) || defined(CONFIG_RTL_DNS_TRAP)
+	skb->srcPhyPort=0xFF;
+	skb->dstPhyPort=0xFF;
+#endif
+
+#if defined(CONFIG_RTK_VLAN_SUPPORT)
+        skb->tag.v = 0;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+        skb->src_info = NULL;
+#endif
+#endif
+
+#if defined(CONFIG_RTL_VLAN_8021Q)
+	memset(skb->linux_vlan_src_tag, 0, 4);
+#endif
+
+#if defined(CONFIG_RTL_DNS_TRAP) || defined(CONFIG_RTL_HTTP_REDIRECT)
+	skb->dns_trap=0;
+	skb->is_dns_pkt = 0;
+	skb->http_redirect=0;
+#endif
+
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
+	skb->decision_bitmap = 0;
+	memset(skb->mark_ext, 0, sizeof(skb->mark_ext));
+#endif
 	/* make sure we initialize shinfo sequentially */
 	shinfo = skb_shinfo(skb);
 	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
@@ -278,6 +353,125 @@ nodata:
 	goto out;
 }
 EXPORT_SYMBOL(__alloc_skb);
+
+#if defined(CONFIG_RTL8190_PRIV_SKB) || defined(CONFIG_RTL_ETH_PRIV_SKB)
+struct sk_buff *dev_alloc_8190_skb(unsigned char *data, int size)
+{
+        struct sk_buff *skb;
+	struct skb_shared_info *shinfo;
+
+ 	struct kmem_cache *cache;
+ 	cache = skbuff_head_cache;
+	/* Get the HEAD */
+        skb = kmem_cache_alloc(cache, GFP_ATOMIC & ~__GFP_DMA);
+        if (!skb)
+                goto out;
+
+        memset(skb, 0, offsetof(struct sk_buff, truesize));
+        atomic_set(&skb->users, 1);
+        skb->head = data;
+        skb->data = data;
+        skb->tail = data;
+
+	size = SKB_DATA_ALIGN(size+RTL_PRIV_DATA_SIZE+NET_SKB_PAD);
+
+        skb->end  = data + size;
+        skb->truesize = size + sizeof(struct sk_buff);
+
+        /* make sure we initialize shinfo sequentially */
+        shinfo = skb_shinfo(skb);
+        atomic_set(&shinfo->dataref, 1);
+        shinfo->nr_frags  = 0;
+        shinfo->gso_size = 0;
+        shinfo->gso_segs = 0;
+        shinfo->gso_type = 0;
+        shinfo->ip6_frag_id = 0;
+        shinfo->frag_list = NULL;
+
+#ifdef CONFIG_RTK_VOIP_VLAN_ID
+        skb->rx_vlan = 0;
+        skb->rx_wlan = 0;
+        skb->priority = 0;
+#endif
+
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	skb->from_dev = NULL;
+	skb->vlan_member = 0;
+#endif
+
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	skb->switch_port = NULL;
+#endif
+
+#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
+	skb->passThruFlag = 0;
+#endif
+
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) ||defined(CONFIG_RTL_QOS_VLANID_SUPPORT)||defined (CONFIG_RTL_VLAN_8021Q)
+	skb->srcPort=0xFFFF;
+	skb->srcVlanId=0;
+#endif
+
+#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
+	skb->srcVlanPriority=0;
+#endif
+
+#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)			
+	skb->original_dscp=0;
+ #endif
+
+ #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
+ 	skb->original_vlanpri=0;
+ #endif
+
+#if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN) || defined(CONFIG_RTL_DNS_TRAP)
+	skb->srcPhyPort=0xFF;
+	skb->dstPhyPort=0xFF;
+#endif
+
+#if defined(CONFIG_RTK_VLAN_SUPPORT)
+	skb->tag.v = 0;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+	skb->src_info = NULL;
+#endif
+#endif
+#if defined(CONFIG_RTL_VLAN_8021Q)
+	memset(skb->linux_vlan_src_tag, 0, 4);
+#endif
+
+#if defined(CONFIG_RTL_DNS_TRAP) || defined(CONFIG_RTL_HTTP_REDIRECT)
+	skb->dns_trap=0;
+	skb->http_redirect=0;
+	skb->is_dns_pkt = 0;
+#endif
+
+#if defined (CONFIG_RTL_LOCAL_PUBLIC)
+	skb->srcLocalPublicIp=0;
+	skb->fromLocalPublic=0;
+	skb->toLocalPublic=0;
+#endif
+
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
+	skb->decision_bitmap = 0;
+	memset(skb->mark_ext, 0, sizeof(skb->mark_ext));
+#endif
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+	skb->inDev=NULL;
+#endif
+
+#ifdef CONFIG_RTK_VOIP_VLAN_ID
+	skb_reserve(skb, RTL_PRIV_DATA_SIZE+4); // for VLAN TAG insertion
+#else
+	skb_reserve(skb, RTL_PRIV_DATA_SIZE);
+#endif
+
+        return skb;
+
+out:
+        return NULL;
+}
+#endif // CONFIG_RTL8190_PRIV_SKB
+
 
 /**
  * build_skb - build a network buffer
@@ -506,7 +700,22 @@ static void skb_release_data(struct sk_buff *skb)
 		if (skb_has_frag_list(skb))
 			skb_drop_fraglist(skb);
 
-		skb_free_head(skb);
+#if defined(CONFIG_RTL_ETH_PRIV_SKB)
+		if (is_rtl865x_eth_priv_buf(skb->head)) {
+			free_rtl865x_eth_priv_buf(skb->head);
+		}
+		else
+#endif
+#ifdef CONFIG_RTL8190_PRIV_SKB
+		if (is_rtl8190_priv_buf(skb->head))
+		{
+			free_rtl8190_priv_buf(skb->head);
+		}
+		else
+#endif
+		{
+			skb_free_head(skb);
+		}
 	}
 }
 
@@ -518,6 +727,9 @@ static void kfree_skbmem(struct sk_buff *skb)
 	struct sk_buff *other;
 	atomic_t *fclone_ref;
 
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	skb->from_dev = NULL;
+#endif
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
 		kmem_cache_free(skbuff_head_cache, skb);
@@ -702,6 +914,59 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE)
 	new->nf_trace		= old->nf_trace;
 #endif
+
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	new->from_dev 		= old->from_dev;
+	new->vlan_member 	= old->vlan_member;
+#endif
+
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	new->switch_port		= old->switch_port;
+#endif
+
+#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
+	new->passThruFlag = old->passThruFlag;
+#endif
+
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) ||defined(CONFIG_RTL_QOS_VLANID_SUPPORT)||defined (CONFIG_RTL_VLAN_8021Q)
+	new->srcPort=old->srcPort;
+	new->srcVlanId=old->srcVlanId;
+#endif
+
+#ifdef CONFIG_RTL_819X
+	new->__unused=old->__unused;
+#endif
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+	new->inDev=old->inDev;
+#endif
+
+#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
+	new->srcVlanPriority=old->srcVlanPriority;
+#endif
+
+#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)			
+	new->original_dscp = old->original_dscp;
+ #endif
+
+ #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
+ 	new->original_vlanpri = old->original_vlanpri;
+ #endif
+
+#if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN) || defined(CONFIG_RTL_DNS_TRAP)
+	new->srcPhyPort=old->srcPhyPort;
+	new->dstPhyPort=old->dstPhyPort;
+#endif
+
+#if defined(CONFIG_RTL_DNS_TRAP) || defined(CONFIG_RTL_HTTP_REDIRECT)
+	new->dns_trap = old->dns_trap;
+	new->is_dns_pkt = old->is_dns_pkt;
+	new->http_redirect = old->http_redirect;
+#endif
+
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
+	new->decision_bitmap = old->decision_bitmap;
+	memcpy(new->mark_ext, old->mark_ext, sizeof(old->mark_ext));
+#endif
 #ifdef CONFIG_NET_SCHED
 	new->tc_index		= old->tc_index;
 #ifdef CONFIG_NET_CLS_ACT
@@ -739,6 +1004,51 @@ static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 	C(head_frag);
 	C(data);
 	C(truesize);
+
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	C(from_dev);
+	C(vlan_member);
+#endif
+
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	C(switch_port);
+#endif
+#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
+	C(passThruFlag);
+#endif
+
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) ||defined(CONFIG_RTL_QOS_VLANID_SUPPORT)||defined (CONFIG_RTL_VLAN_8021Q)
+	C(srcPort);
+	C(srcVlanId);
+#endif
+
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+	C(inDev);
+#endif
+
+#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
+	C(srcVlanPriority);
+#endif
+
+#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)			
+	C(original_dscp);
+ #endif
+
+ #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
+ 	C(original_vlanpri);
+ #endif
+
+#if defined(CONFIG_RTL_DNS_TRAP) || defined(CONFIG_RTL_HTTP_REDIRECT)
+	C(dns_trap);
+	C(is_dns_pkt);
+	C(http_redirect);
+#endif
+
+#if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN) || defined(CONFIG_RTL_DNS_TRAP)
+	C(srcPhyPort);
+	C(dstPhyPort);
+#endif
+	
 	atomic_set(&n->users, 1);
 
 	atomic_inc(&(skb_shinfo(skb)->dataref));
@@ -865,7 +1175,18 @@ struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 		kmemcheck_annotate_bitfield(n, flags2);
 		n->fclone = SKB_FCLONE_UNAVAILABLE;
 	}
+	
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+	//C(tag.v);
+	n->tag.v = skb->tag.v;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+	n->src_info = skb->src_info;
+#endif
+#endif
 
+#if defined(CONFIG_RTL_VLAN_8021Q)
+	memcpy(n->linux_vlan_src_tag, skb->linux_vlan_src_tag, 4);
+#endif
 	return __skb_clone(n, skb);
 }
 EXPORT_SYMBOL(skb_clone);
@@ -882,7 +1203,11 @@ static void skb_headers_offset_update(struct sk_buff *skb, int off)
 	skb->inner_mac_header += off;
 }
 
+#if defined(CONFIG_RTL_ETH_PRIV_SKB) || defined(CONFIG_NET_WIRELESS_AGN) || defined(CONFIG_NET_WIRELESS_AG) || defined(CONFIG_WIRELESS)
+void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
+#else
 static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
+#endif
 {
 #ifndef NET_SKBUFF_DATA_USES_OFFSET
 	/*
@@ -895,6 +1220,17 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 
 #ifndef NET_SKBUFF_DATA_USES_OFFSET
 	skb_headers_offset_update(new, offset);
+#endif
+
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+        new->tag.v = old->tag.v;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+        new->src_info = old->src_info;
+#endif
+#endif
+
+#if defined(CONFIG_RTL_VLAN_8021Q)
+	memcpy(new->linux_vlan_src_tag, old->linux_vlan_src_tag, 4);
 #endif
 	skb_shinfo(new)->gso_size = skb_shinfo(old)->gso_size;
 	skb_shinfo(new)->gso_segs = skb_shinfo(old)->gso_segs;
@@ -1073,6 +1409,19 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
 
 		skb_release_data(skb);
 	} else {
+#if defined(CONFIG_RTL_ETH_PRIV_SKB)
+		if (is_rtl865x_eth_priv_buf(skb->head)) {
+			free_rtl865x_eth_priv_buf(skb->head);
+		}
+		else
+#endif
+#ifdef CONFIG_RTL8190_PRIV_SKB
+		if (is_rtl8190_priv_buf(skb->head))
+		{
+			free_rtl8190_priv_buf(skb->head);
+		}
+		else
+#endif
 		skb_free_head(skb);
 	}
 	off = (data + nhead) - skb->head;

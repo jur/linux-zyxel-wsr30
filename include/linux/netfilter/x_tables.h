@@ -126,6 +126,14 @@ struct xt_match {
 	void (*compat_from_user)(void *dst, const void *src);
 	int (*compat_to_user)(void __user *dst, const void *src);
 #endif
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	int (*match2acl)(const char *tablename,
+			  const void *ip,
+			  const struct xt_match *match,
+			  void *matchinfo,
+			  void *rule,
+			  unsigned int *invflag);
+#endif
 	/* Set this to THIS_MODULE if you are a module, otherwise NULL */
 	struct module *me;
 
@@ -165,6 +173,15 @@ struct xt_target {
 	/* Called when userspace align differs from kernel space one */
 	void (*compat_from_user)(void *dst, const void *src);
 	int (*compat_to_user)(void __user *dst, const void *src);
+#endif
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	int (*target2acl)(const char *tablename,
+			  const void *entry,
+			  const struct xt_target *target,
+			  void *targinfo,
+			 void *rule,
+			  unsigned int hook_mask, 
+			  void **data);
 #endif
 	/* Set this to THIS_MODULE if you are a module, otherwise NULL */
 	struct module *me;
@@ -353,8 +370,10 @@ static inline unsigned long ifname_compare_aligned(const char *_a,
 	return ret;
 }
 
+#if defined(CONFIG_NETFILTER_XTABLES) //&& !defined(CONFIG_RTL_AP_PACKAGE) //mark_hap
 extern struct nf_hook_ops *xt_hook_link(const struct xt_table *, nf_hookfn *);
 extern void xt_hook_unlink(const struct xt_table *, struct nf_hook_ops *);
+#endif
 
 #ifdef CONFIG_COMPAT
 #include <net/compat.h>

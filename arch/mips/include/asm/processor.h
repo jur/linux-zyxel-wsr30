@@ -26,12 +26,6 @@
 #define current_text_addr() ({ __label__ _l; _l: &&_l;})
 
 /*
- * System setup and hardware flags..
- */
-
-extern unsigned int vced_count, vcei_count;
-
-/*
  * MIPS does have an arch_pick_mmap_layout()
  */
 #define HAVE_ARCH_PICK_MMAP_LAYOUT 1
@@ -211,6 +205,7 @@ struct thread_struct {
 	/* Saved cp0 stuff. */
 	unsigned long cp0_status;
 
+#ifdef CONFIG_CPU_HAS_FPU
 	/* Saved fpu/fpu emulator stuff. */
 	struct mips_fpu_struct fpu;
 #ifdef CONFIG_MIPS_MT_FPAFF
@@ -219,12 +214,17 @@ struct thread_struct {
 	/* Saved per-thread scheduler affinity mask */
 	cpumask_t user_cpus_allowed;
 #endif /* CONFIG_MIPS_MT_FPAFF */
+#endif
 
+#ifdef CONFIG_CPU_HAS_DSP
 	/* Saved state of the DSP ASE, if available. */
 	struct mips_dsp_state dsp;
+#endif
 
+#ifdef CONFIG_CPU_HAS_WATCH
 	/* Saved watch register state, if available. */
 	union mips_watch_reg_state watch;
+#endif
 
 	/* Other stuff associated with the thread. */
 	unsigned long cp0_badvaddr;	/* Last user fault */
@@ -236,6 +236,32 @@ struct thread_struct {
 #endif
 	struct mips_abi *abi;
 };
+
+#ifdef CONFIG_CPU_HAS_FPU
+#define FPU_INIT						\
+	.fpu			= {				\
+		.fpr		= {0,},				\
+		.fcr31		= 0,				\
+	},
+#else
+#define FPU_INIT
+#endif
+
+#ifdef CONFIG_CPU_HAS_DSP
+#define DSP_INIT						\
+	.dsp			= {				\
+		.dspr		= {0, },			\
+		.dspcontrol	= 0,				\
+	},
+#else
+#define DSP_INIT
+#endif
+
+#ifdef CONFIG_CPU_HAS_WATCH
+#define WATCH_INIT		.watch = {{{0,},},},
+#else
+#define WATCH_INIT
+#endif
 
 #ifdef CONFIG_MIPS_MT_FPAFF
 #define FPAFF_INIT						\
@@ -274,10 +300,7 @@ struct thread_struct {
 	/*							\
 	 * Saved FPU/FPU emulator stuff				\
 	 */							\
-	.fpu			= {				\
-		.fpr		= {0,},				\
-		.fcr31		= 0,				\
-	},							\
+	FPU_INIT						\
 	/*							\
 	 * FPU affinity state (null if not FPAFF)		\
 	 */							\
@@ -285,14 +308,11 @@ struct thread_struct {
 	/*							\
 	 * Saved DSP stuff					\
 	 */							\
-	.dsp			= {				\
-		.dspr		= {0, },			\
-		.dspcontrol	= 0,				\
-	},							\
+	DSP_INIT						\
 	/*							\
 	 * saved watch register stuff				\
 	 */							\
-	.watch = {{{0,},},},					\
+	WATCH_INIT						\
 	/*							\
 	 * Other stuff associated with the process		\
 	 */							\

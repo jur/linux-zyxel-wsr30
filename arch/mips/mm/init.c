@@ -446,7 +446,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 
 void __init_refok free_initmem(void)
 {
-	prom_free_prom_memory();
+	bsp_free_prom_memory();
 	free_initmem_default(POISON_FREE_INITMEM);
 }
 

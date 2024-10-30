@@ -1118,6 +1118,49 @@ static int ax88179_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 	if (skb->len < dev->net->hard_header_len)
 		return 0;
 
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)	
+	/*
+	 * Passthru Policy:
+	 *	   For Multicast: both to real net device and pass through
+	 *	   For Unitcast:
+	 *		   If dest is real net device, only to real net device
+	 *		   Else
+	 *			  pass thru
+	 * NOTE:
+	 *      skb->data here has extra 2 bytes(0xee 0xee) before L2 hdr
+	 */
+#define USBNET_SKB_MAC_DST_OFFSET		 	2
+#define USBNET_SKB_L3_PROTO_TYPE_OFFSET  	(USBNET_SKB_MAC_DST_OFFSET + 6 + 6)
+	if(skb->data && 
+		(((skb->data[USBNET_SKB_L3_PROTO_TYPE_OFFSET])&0xFF)==0x86) && 
+		(((skb->data[USBNET_SKB_L3_PROTO_TYPE_OFFSET+1])&0xFF)==0xdd)
+	   )
+	{
+		/* is v6 packet */
+		char usbnet_dmac[6] = {0};
+		memcpy(usbnet_dmac, skb->data + USBNET_SKB_MAC_DST_OFFSET, 6);
+		if(((usbnet_dmac[0]&0xFF) == 0x33) && ((usbnet_dmac[1]&0xFF) == 0x33) )
+		{
+			/* is multicast packet */
+			dev->isPseudo = USBNET_PSEUDO_BOTH;
+		}else if(!compare_ether_addr((char* )dev->net->dev_addr, (char*)usbnet_dmac))
+		{
+		    /* is unicast and to this real net device */
+			char *dev_mac = (char* )dev->net->dev_addr;
+			//printk("dev mac: %02x:%02x:%02x:%02x:%02x:%02x",
+				//dev_mac[0],dev_mac[1],dev_mac[2],dev_mac[3],dev_mac[4],dev_mac[5]);
+			//printk("packet dmac: %02x:%02x:%02x:%02x:%02x:%02x",
+				//usbnet_dmac[0],usbnet_dmac[1],usbnet_dmac[2],usbnet_dmac[3],usbnet_dmac[4],usbnet_dmac[5]);
+			dev->isPseudo = USBNET_PSEUDO_NEGTIVE;
+		}else
+		{
+		    /* is unicast pass through packet */
+			dev->isPseudo = USBNET_PSEUDO_YES;
+		}
+		//printk("[%s:%d] dev->isPseudo: %d\n", __FUNCTION__, __LINE__, dev->isPseudo);
+	}
+#endif
+
 	skb_trim(skb, skb->len - 4);
 	memcpy(&rx_hdr, skb_tail_pointer(skb), 4);
 	le32_to_cpus(&rx_hdr);

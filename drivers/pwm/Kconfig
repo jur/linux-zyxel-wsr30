@@ -106,6 +106,17 @@ config PWM_PUV3
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-puv3.
 
+config PWM_RTK
+	tristate "RTK PWM"
+	depends on PWM
+	default n
+	help	
+		Generic PWM framework driver for Realtek.
+		
+		To compile this driver as a module, choose M here: the module
+		will be called pwm-rtk.
+	
+
 config PWM_PXA
 	tristate "PXA PWM support"
 	depends on ARCH_PXA

@@ -730,10 +730,12 @@ static void xhci_giveback_urb_in_irq(struct xhci_hcd *xhci,
 	if (urb_priv->td_cnt == urb_priv->length) {
 		if (usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS) {
 			xhci_to_hcd(xhci)->self.bandwidth_isoc_reqs--;
+#if 0
 			if (xhci_to_hcd(xhci)->self.bandwidth_isoc_reqs	== 0) {
 				if (xhci->quirks & XHCI_AMD_PLL_FIX)
 					usb_amd_quirk_pll_enable();
 			}
+#endif
 		}
 		usb_hcd_unlink_urb_from_ep(hcd, urb);
 
@@ -1982,11 +1984,13 @@ td_cleanup:
 			ret = 1;
 			if (usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS) {
 				xhci_to_hcd(xhci)->self.bandwidth_isoc_reqs--;
+#if 0
 				if (xhci_to_hcd(xhci)->self.bandwidth_isoc_reqs
 					== 0) {
 					if (xhci->quirks & XHCI_AMD_PLL_FIX)
 						usb_amd_quirk_pll_enable();
 				}
+#endif
 			}
 		}
 	}
@@ -2408,8 +2412,8 @@ static int handle_tx_event(struct xhci_hcd *xhci,
 		if (xhci->quirks & XHCI_TRUST_TX_LENGTH)
 			trb_comp_code = COMP_SHORT_TX;
 		else
-			xhci_warn_ratelimited(xhci,
-					"WARN Successful completion on short TX: needs XHCI_TRUST_TX_LENGTH quirk?\n");
+			xhci_warn(xhci, "WARN Successful completion on short TX: "
+					"needs XHCI_TRUST_TX_LENGTH quirk?\n");
 	case COMP_SHORT_TX:
 		break;
 	case COMP_STOP:
@@ -3792,10 +3796,12 @@ static int xhci_queue_isoc_tx(struct xhci_hcd *xhci, gfp_t mem_flags,
 		}
 	}
 
+#ifdef CONFIG_USB_XHCI_PCI
 	if (xhci_to_hcd(xhci)->self.bandwidth_isoc_reqs == 0) {
 		if (xhci->quirks & XHCI_AMD_PLL_FIX)
 			usb_amd_quirk_pll_disable();
 	}
+#endif
 	xhci_to_hcd(xhci)->self.bandwidth_isoc_reqs++;
 
 	giveback_first_trb(xhci, slot_id, ep_index, urb->stream_id,

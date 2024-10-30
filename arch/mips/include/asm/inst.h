@@ -73,7 +73,7 @@
 
 typedef unsigned int mips_instruction;
 
-/* microMIPS instruction decode structure. Do NOT export!!! */
+/* MIPS16m instruction decode structure. Do NOT export!!! */
 struct mm_decoded_insn {
 	mips_instruction insn;
 	mips_instruction next_insn;

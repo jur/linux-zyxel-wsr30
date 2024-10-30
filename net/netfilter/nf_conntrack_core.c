@@ -50,9 +50,59 @@
 #include <net/netfilter/nf_nat.h>
 #include <net/netfilter/nf_nat_core.h>
 #include <net/netfilter/nf_nat_helper.h>
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#include <net/rtl/features/rtl_ps_log.h>
+#include <net/rtl/features/rtl_features.h>
+#include <linux/in.h>
+#endif
 
 #define NF_CONNTRACK_VERSION	"0.5.0"
 
+#if defined(CONFIG_RTL_819X)
+int	rtl_nf_conntrack_threshold;
+static inline int _isReservedL4Port(unsigned short port)
+{
+	//if((port < 1024) || (port == 8080))
+	if((port == 80) || (port == 8080))
+		return 1;
+
+	return 0;
+}
+
+static inline int _isReservedIPAddr(unsigned int srcIP, unsigned int dstIP)
+{
+	if(IS_CLASSD_ADDR(dstIP) ||
+		IS_BROADCAST_ADDR(dstIP) ||
+		IS_ALLZERO_ADDR(srcIP))
+		return 1;
+
+	return 0;
+}
+int isReservedConntrack(const struct nf_conntrack_tuple *orig,
+				   const struct nf_conntrack_tuple *repl)
+{
+	if(orig->dst.protonum==IPPROTO_ICMP)
+	{
+		return 1;
+	}
+
+	if(_isReservedIPAddr(orig->src.u3.ip, orig->dst.u3.ip) ||
+		_isReservedIPAddr(repl->src.u3.ip, repl->dst.u3.ip))
+	{
+		return 1;
+	}
+
+	if(_isReservedL4Port(orig->src.u.all) ||
+		_isReservedL4Port(orig->dst.u.all) ||
+		_isReservedL4Port(repl->src.u.all) ||
+		_isReservedL4Port(repl->dst.u.all))
+	{
+		return 1;
+	}
+	return 0;
+}
+#endif
 int (*nfnetlink_parse_nat_setup_hook)(struct nf_conn *ct,
 				      enum nf_nat_manip_type manip,
 				      const struct nlattr *attr) __read_mostly;
@@ -185,6 +235,7 @@ nf_ct_invert_tuple(struct nf_conntrack_tuple *inverse,
 }
 EXPORT_SYMBOL_GPL(nf_ct_invert_tuple);
 
+#if !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
 static void
 clean_from_lists(struct nf_conn *ct)
 {
@@ -195,6 +246,7 @@ clean_from_lists(struct nf_conn *ct)
 	/* Destroy all pending expectations */
 	nf_ct_remove_expectations(ct);
 }
+#endif
 
 static void
 destroy_conntrack(struct nf_conntrack *nfct)
@@ -202,6 +254,9 @@ destroy_conntrack(struct nf_conntrack *nfct)
 	struct nf_conn *ct = (struct nf_conn *)nfct;
 	struct net *net = nf_ct_net(ct);
 	struct nf_conntrack_l4proto *l4proto;
+	#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_inso_s	conn_info;
+	#endif
 
 	pr_debug("destroy_conntrack(%p)\n", ct);
 	NF_CT_ASSERT(atomic_read(&nfct->use) == 0);
@@ -210,6 +265,13 @@ destroy_conntrack(struct nf_conntrack *nfct)
 	/* To make sure we don't get any weird locking issues here:
 	 * destroy_conntrack() MUST NOT be called with a write lock
 	 * to nf_conntrack_lock!!! -HW */
+	 #if defined(CONFIG_RTL_819X)
+	conn_info.net = net;
+	conn_info.ct = ct;
+
+	rtl_nf_conntrack_destroy_hooks(&conn_info);
+	#endif
+
 	rcu_read_lock();
 	l4proto = __nf_ct_l4proto_find(nf_ct_l3num(ct), nf_ct_protonum(ct));
 	if (l4proto && l4proto->destroy)
@@ -223,6 +285,13 @@ destroy_conntrack(struct nf_conntrack *nfct)
 	 * before connection is in the list, so we need to clean here,
 	 * too. */
 	nf_ct_remove_expectations(ct);
+	
+	#if defined(CONFIG_NETFILTER_XT_MATCH_LAYER7) || defined(CONFIG_NETFILTER_XT_MATCH_LAYER7_MODULE)
+	if(ct->layer7.app_proto)
+		kfree(ct->layer7.app_proto);
+	if(ct->layer7.app_data)
+	kfree(ct->layer7.app_data);
+	#endif
 
 	/* We overload first tuple to link into unconfirmed or dying list.*/
 	BUG_ON(hlist_nulls_unhashed(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode));
@@ -238,6 +307,31 @@ destroy_conntrack(struct nf_conntrack *nfct)
 	nf_conntrack_free(ct);
 }
 
+#if defined(CONFIG_RTL_819X)	//(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+static void death_by_timeout_forced(unsigned long ul_conntrack)
+{
+	struct nf_conn *ct = (void *)ul_conntrack;
+	struct nf_conn_tstamp *tstamp;
+
+
+	tstamp = nf_conn_tstamp_find(ct);
+	if (tstamp && tstamp->stop == 0)
+		tstamp->stop = ktime_to_ns(ktime_get_real());
+
+	if (!test_bit(IPS_DYING_BIT, &ct->status) &&
+	    unlikely(nf_conntrack_event(IPCT_DESTROY, ct) < 0)) {
+		/* destroy event was not delivered */
+		nf_ct_delete_from_lists(ct);
+		nf_ct_dying_timeout(ct);
+		return;
+	}
+	set_bit(IPS_DYING_BIT, &ct->status);
+	nf_ct_delete_from_lists(ct);
+	nf_ct_put(ct);
+}
+#endif
+
+
 void nf_ct_delete_from_lists(struct nf_conn *ct)
 {
 	struct net *net = nf_ct_net(ct);
@@ -247,7 +341,11 @@ void nf_ct_delete_from_lists(struct nf_conn *ct)
 	/* Inside lock so preempt is disabled on module removal path.
 	 * Otherwise we can get spurious warnings. */
 	NF_CT_STAT_INC(net, delete_list);
+	#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	clean_from_lists(ct, net);
+	#else
 	clean_from_lists(ct);
+    #endif
 	/* add this conntrack to the dying list */
 	hlist_nulls_add_head(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
 			     &net->ct.dying);
@@ -294,6 +392,16 @@ static void death_by_timeout(unsigned long ul_conntrack)
 {
 	struct nf_conn *ct = (void *)ul_conntrack;
 	struct nf_conn_tstamp *tstamp;
+
+	#if defined(CONFIG_RTL_819X)
+	struct net *net = nf_ct_net(ct);
+	rtl_nf_conntrack_inso_s	conn_info;
+
+	conn_info.net = net;
+	conn_info.ct = ct;
+	if (RTL_PS_HOOKS_RETURN==rtl_nf_conntrack_death_by_timeout_hooks(&conn_info))
+		return;
+	#endif
 
 	tstamp = nf_conn_tstamp_find(ct);
 	if (tstamp && tstamp->stop == 0)
@@ -470,6 +578,9 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	enum ip_conntrack_info ctinfo;
 	struct net *net;
 	u16 zone;
+	#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_inso_s		conn_info;
+	#endif
 
 	ct = nf_ct_get(skb, &ctinfo);
 	net = nf_ct_net(ct);
@@ -526,6 +637,14 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 
 	/* Remove from unconfirmed list */
 	hlist_nulls_del_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode);
+
+	#if defined(CONFIG_RTL_819X)
+	conn_info.net = net;
+	conn_info.ct = ct;
+	conn_info.skb = skb;
+	conn_info.ctinfo = ctinfo;
+	rtl_nf_conntrack_confirm_hooks(&conn_info);
+	#endif
 
 	/* Timer relative to confirmation time, not original
 	   setting time, otherwise we'd get timer wrap in
@@ -603,6 +722,7 @@ EXPORT_SYMBOL_GPL(nf_conntrack_tuple_taken);
 
 #define NF_CT_EVICTION_RANGE	8
 
+#if !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)	/* used only when NOT define GARBAGE_NEW */
 /* There's a small race here where we may free a just-assured
    connection.  Too bad: we're in trouble anyway. */
 static noinline int early_drop(struct net *net, unsigned int hash)
@@ -654,6 +774,7 @@ static noinline int early_drop(struct net *net, unsigned int hash)
 	nf_ct_put(ct);
 	return dropped;
 }
+#endif
 
 void init_nf_conntrack_hash_rnd(void)
 {
@@ -686,16 +807,44 @@ __nf_conntrack_alloc(struct net *net, u16 zone,
 
 	/* We don't want any race condition at early drop stage */
 	atomic_inc(&net->ct.count);
+//#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+#if defined(CONFIG_RTL_819X)
+	if(nf_conntrack_max &&
+		((atomic_read(&net->ct.count) > rtl_nf_conntrack_threshold))&&
+		(atomic_read(&net->ct.count) < (nf_conntrack_max-1)))
+	{
+		if(isReservedConntrack(orig,repl))
+		{
+			/*use reserved conntrack,continue to allocate*/
+			goto alloc_reserved_conn;
+		}
+	}
+#endif
 
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
 	if (nf_conntrack_max &&
-	    unlikely(atomic_read(&net->ct.count) > nf_conntrack_max)) {
-		if (!early_drop(net, hash_bucket(hash, net))) {
+	    unlikely(atomic_read(&net->ct.count) > rtl_nf_conntrack_threshold)) 
+#else
+	if (nf_conntrack_max &&
+	    unlikely(atomic_read(&net->ct.count) > nf_conntrack_max)) 
+#endif
+    {
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+		if(!drop_one_conntrack(orig,repl))
+#else
+		if (!early_drop(net, hash_bucket(hash, net))) 
+#endif
+        {
 			atomic_dec(&net->ct.count);
 			net_warn_ratelimited("nf_conntrack: table full, dropping packet\n");
 			return ERR_PTR(-ENOMEM);
 		}
 	}
 
+//#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+#if defined(CONFIG_RTL_819X)
+alloc_reserved_conn:
+#endif
 	/*
 	 * Do not use kmem_cache_zalloc(), as this cache uses
 	 * SLAB_DESTROY_BY_RCU.
@@ -766,6 +915,146 @@ void nf_conntrack_free(struct nf_conn *ct)
 }
 EXPORT_SYMBOL_GPL(nf_conntrack_free);
 
+#if defined(CONFIG_RTL_BATTLENET_ALG)
+unsigned int wan_ip = 0;
+unsigned int wan_mask = 0;
+
+struct nf_conn *rtl_find_ct_by_tuple_dst(struct nf_conntrack_tuple *tuple, int *flag)
+{
+	int i;
+	extern unsigned int _br0_ip;
+	extern unsigned int _br0_mask;
+	struct nf_conn *ct;
+	struct nf_conntrack_tuple_hash *h;
+	struct hlist_nulls_node *n;
+
+	for(i=0; i< nf_conntrack_htable_size; i++)
+	{
+		hlist_nulls_for_each_entry(h, n, &init_net.ct.hash[i], hnnode)
+		{
+			if((__nf_ct_tuple_dst_equal(tuple, &h->tuple)) &&
+			  ((h->tuple.src.u3.ip & _br0_mask) != (_br0_ip & _br0_mask))&&
+			   (h->tuple.src.u.all == BATTLENET_PORT))
+			  {
+				//memcpy(&reply_tuple_temp, h, sizeof(struct nf_conntrack_tuple_hash));
+				ct = nf_ct_tuplehash_to_ctrack(h);
+
+				if(((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip & _br0_mask) == (_br0_ip & _br0_mask)) &&
+				    ((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip & _br0_mask) != (_br0_ip & _br0_mask))&&
+				     (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip != tuple->src.u3.ip)){
+						*flag = 1;
+						return ct;
+					}
+			  }
+		}
+	}
+
+	return NULL;
+
+}
+
+struct nf_conn *rtl_find_ct_by_tuple_src(struct nf_conntrack_tuple *tuple, int *flag)
+{
+	int i;
+	extern unsigned int _br0_ip;
+	extern unsigned int _br0_mask;
+	struct nf_conn *ct;
+	struct nf_conntrack_tuple_hash *h;
+	struct hlist_nulls_node *n;
+
+	for(i=0; i< nf_conntrack_htable_size; i++)
+	{
+		hlist_nulls_for_each_entry(h, n, &init_net.ct.hash[i], hnnode)
+		{
+			if((__nf_ct_tuple_src_equal(tuple, &h->tuple)) &&
+			   (h->tuple.src.u3.ip  != wan_ip))
+			  {
+				ct = nf_ct_tuplehash_to_ctrack(h);
+
+				if(((ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip & _br0_mask) != (_br0_ip & _br0_mask)) &&
+				     (ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u.all == BATTLENET_PORT)&&
+				     (ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip == wan_ip)){
+						*flag = 1;
+						return ct;
+					}
+			  }
+		}
+	}
+
+	return NULL;
+
+}
+
+static void rtl_reconfig_reply_tupe(struct sk_buff *skb, const struct nf_conntrack_tuple *tuple,
+	struct nf_conntrack_tuple *repl_tuple)
+{
+
+	extern unsigned int _br0_ip;
+	extern unsigned int _br0_mask;
+
+	int flag_reply = 0;
+	int flag_ori = 0;
+	struct nf_conn *ct_temp_reply = NULL;
+	struct nf_conn *ct_temp_ori = NULL;
+	struct net_device *wan_device = NULL;
+
+	//struct nf_conntrack_tuple_hash reply_tuple_temp;
+	//memset(&reply_tuple_temp, 0, sizeof(struct nf_conntrack_tuple_hash));
+
+	wan_device = rtl865x_getBattleNetWanDev();
+	rtl865x_getBattleNetDevIpAndNetmask(wan_device, &wan_ip, &wan_mask);
+	/*
+	1. protocol is udp;
+	2. original src port is 6112;
+	3. original src ip is lan ip;
+	4. original dst ip is wan ip(ppp dev ip);
+	e.g:
+	original:192.168.1.100:6112->192.168.123.2:6112
+	reply_1: 192.168.123.2:6112->192.168.1.100:6112
+	reply_2: 192.168.1.101:6112->192.168.123.2:6112
+	*/
+	//printk("_br0_ip is %2x, _br0_mask is %2x\n", _br0_ip, _br0_mask);
+	if((ip_hdr(skb)->protocol == IPPROTO_UDP) &&
+		(ntohs(tuple->src.u.all) == BATTLENET_PORT) &&
+		((tuple->src.u3.ip & _br0_mask) == (_br0_ip & _br0_mask)) &&
+		((wan_ip!=0)&&(tuple->dst.u3.ip == wan_ip)))
+	{
+		spin_lock_bh(&nf_conntrack_lock);
+		ct_temp_reply = rtl_find_ct_by_tuple_dst(tuple, &flag_reply);
+
+		if((flag_reply == 1) && (ct_temp_reply != NULL))
+		{
+			/*printk("%s[%d],  sip is %2x, sport is %d; dip is %2x, dport is %d\n", __FUNCTION__, __LINE__,
+				h->tuple.src.u3.ip, h->tuple.src.u.all,
+				h->tuple.dst.u3.ip, h->tuple.dst.u.all);*/
+
+			/*printk("%s[%d],  sip is %2x, sport is %d; dip is %2x, dport is %d\n", __FUNCTION__, __LINE__,
+					ct_temp_reply->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,
+					ct_temp_reply->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.all,
+					ct_temp_reply->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip,
+					ct_temp_reply->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.all);*/
+
+			ct_temp_ori = rtl_find_ct_by_tuple_src(tuple, &flag_ori);
+
+			if((flag_ori == 1) && (ct_temp_ori != NULL))
+			{
+				/*change ct's reply src ip and port as the original tuple found*/
+				repl_tuple->src.u3.ip = ct_temp_reply->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip;
+				repl_tuple->src.u.all  = ct_temp_reply->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.all;
+
+				/*change ct's reply dst ip and port as original dst ip and port*/
+				repl_tuple->dst.u3.ip = tuple->dst.u3.ip;
+				repl_tuple->dst.u.all  = ct_temp_ori->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.all;
+			}
+		}
+
+		spin_unlock_bh(&nf_conntrack_lock);
+
+	}
+
+}
+#endif
+
 
 /* Allocate a new conntrack: we return -ENOMEM if classification
    failed due to stress.  Otherwise it really is unclassifiable. */
@@ -782,6 +1071,9 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 	struct nf_conntrack_tuple repl_tuple;
 	struct nf_conntrack_ecache *ecache;
 	struct nf_conntrack_expect *exp;
+	#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_inso_s	conn_info;
+	#endif
 	u16 zone = tmpl ? nf_ct_zone(tmpl) : NF_CT_DEFAULT_ZONE;
 	struct nf_conn_timeout *timeout_ext;
 	unsigned int *timeouts;
@@ -790,6 +1082,10 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 		pr_debug("Can't invert tuple.\n");
 		return NULL;
 	}
+
+	#if defined(CONFIG_RTL_BATTLENET_ALG)
+	rtl_reconfig_reply_tupe(skb, tuple, &repl_tuple);
+	#endif
 
 	ct = __nf_conntrack_alloc(net, zone, tuple, &repl_tuple, GFP_ATOMIC,
 				  hash);
@@ -847,6 +1143,22 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 		__nf_ct_try_assign_helper(ct, tmpl, GFP_ATOMIC);
 		NF_CT_STAT_INC(net, new);
 	}
+
+	#if defined(CONFIG_RTL_819X)
+	conn_info.net = net;
+	conn_info.ct = ct;
+	conn_info.skb = skb;
+	conn_info.l3proto = l3proto;
+	conn_info.l4proto = l4proto;
+	rtl_nf_init_conntrack_hooks(&conn_info);
+	#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	ct->drop_flag = -1;
+	ct->removed   = 0;
+	#endif
+	#if defined(CONFIG_RTL_HW_NAT_BYPASS_PKT)
+	ct->count = 0;
+	#endif
+	#endif
 
 	/* Overload tuple linked list to put us in unconfirmed list. */
 	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
@@ -926,6 +1238,15 @@ resolve_normal_ct(struct net *net, struct nf_conn *tmpl,
 	return ct;
 }
 
+#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+extern int fast_nat_fw;
+#endif
+#if defined(CONFIG_RTL_FAST_IPV6)
+extern int fast_ipv6_fw;
+#endif
+#endif
+
 unsigned int
 nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 		struct sk_buff *skb)
@@ -939,6 +1260,10 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 	u_int8_t protonum;
 	int set_reply = 0;
 	int ret;
+	#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_inso_s		conn_info;
+	#endif
+
 
 	if (skb->nfct) {
 		/* Previously seen (loopback or untracked)?  Ignore. */
@@ -1015,6 +1340,31 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 		ret = -ret;
 		goto out;
 	}
+	
+	#if defined(CONFIG_RTL_819X)
+	#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+	if (0
+		#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+		|| fast_nat_fw
+		#endif
+		#if defined(CONFIG_RTL_FAST_IPV6)
+		|| fast_ipv6_fw
+		#endif
+	 )
+	#endif
+	{
+		conn_info.net = net;
+		conn_info.ct = ct;
+		conn_info.skb = skb;
+		conn_info.l3proto = l3proto;
+		conn_info.l4proto = l4proto;
+		conn_info.protonum = protonum;
+		conn_info.hooknum = hooknum;
+		conn_info.ctinfo = ctinfo;
+		rtl_nf_conntrack_in_hooks(&conn_info);
+	}
+	#endif
+
 
 	if (set_reply && !test_and_set_bit(IPS_SEEN_REPLY_BIT, &ct->status))
 		nf_conntrack_event_cache(IPCT_REPLY, ct);
@@ -1078,6 +1428,9 @@ void __nf_ct_refresh_acct(struct nf_conn *ct,
 			  unsigned long extra_jiffies,
 			  int do_acct)
 {
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	int event = 0;
+#endif
 	NF_CT_ASSERT(ct->timeout.data == (unsigned long)ct);
 	NF_CT_ASSERT(skb);
 
@@ -1088,14 +1441,21 @@ void __nf_ct_refresh_acct(struct nf_conn *ct,
 	/* If not in hash table, timer will not be active yet */
 	if (!nf_ct_is_confirmed(ct)) {
 		ct->timeout.expires = extra_jiffies;
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+		event = IPCT_REFRESH_BIT;
+#endif
 	} else {
 		unsigned long newtime = jiffies + extra_jiffies;
 
 		/* Only update the timeout if the new timeout is at least
 		   HZ jiffies from the old timeout. Need del_timer for race
 		   avoidance (may already be dying). */
-		if (newtime - ct->timeout.expires >= HZ)
+		if (newtime - ct->timeout.expires >= HZ){
 			mod_timer_pending(&ct->timeout, newtime);
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+			event = IPCT_REFRESH_BIT;
+#endif
+		}
 	}
 
 acct:
@@ -1108,6 +1468,11 @@ acct:
 			atomic64_add(skb->len, &acct[CTINFO2DIR(ctinfo)].bytes);
 		}
 	}
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	/* must be unlocked when calling event cache  xxx:need check*/
+	if (event)
+			nf_conntrack_event_cache(event, ct);
+#endif
 }
 EXPORT_SYMBOL_GPL(__nf_ct_refresh_acct);
 
@@ -1252,7 +1617,13 @@ void nf_ct_iterate_cleanup(struct net *net,
 	while ((ct = get_next_corpse(net, iter, data, &bucket)) != NULL) {
 		/* Time to push up daises... */
 		if (del_timer(&ct->timeout))
+		{
+			#if defined(CONFIG_RTL_819X)	//(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+			death_by_timeout_forced((unsigned long)ct);
+			#else
 			death_by_timeout((unsigned long)ct);
+			#endif
+		}
 		/* ... else the timer will get him soon. */
 
 		nf_ct_put(ct);
@@ -1500,6 +1871,102 @@ void nf_ct_untracked_status_or(unsigned long bits)
 }
 EXPORT_SYMBOL_GPL(nf_ct_untracked_status_or);
 
+#ifdef RTL_NF_ALG_CTL
+#include <linux/seq_file.h>
+
+struct alg_entry alg_list[alg_type_end] =
+{
+    ALG_CTL_DEF(ftp,  1),
+    ALG_CTL_DEF(tftp, 1),
+    ALG_CTL_DEF(rtsp, 1),
+    ALG_CTL_DEF(pptp, 1),
+    ALG_CTL_DEF(l2tp, 1),
+    ALG_CTL_DEF(ipsec,1),
+    ALG_CTL_DEF(sip,  1),
+    ALG_CTL_DEF(h323, 1),
+};
+
+int alg_enable(int type)
+{
+    return alg_list[type].enable;
+}
+EXPORT_SYMBOL_GPL(alg_enable);
+
+static struct proc_dir_entry *proc_alg = NULL;
+
+extern struct proc_dir_entry proc_root;
+static int proc_alg_debug_read(struct seq_file *s, void *v)
+{
+	int i = 0;
+
+	seq_printf(s, "\n===================================================\n");
+	for (i=0; i < alg_type_end; i++)
+	{
+	     seq_printf(s, "| %s=%d\n", alg_list[i].name, alg_list[i].enable);
+	}
+	seq_printf(s, "---------------------------------------------------\n");
+
+	return 0;
+}
+
+static int proc_alg_debug_write( struct file *filp, const char __user *buf,unsigned long len, void *data )
+{
+	int ret;
+	char str_buf[256];
+	char action[20] = {0};
+	int val = 0;
+	int i = 0;
+
+	if(len > 255)
+	{
+		printk("Usage: echo ftp 1 > /proc/alg \n");
+		return len;
+	}
+
+	copy_from_user(str_buf,buf,len);
+	str_buf[len] = '\0';
+
+	ret = sscanf(str_buf, "%s %d", action, (int*)&val);
+	if(ret != 2 || val < 0 )
+	{
+		printk("Error. Sample: echo ftp 1 > /proc/alg \n");
+		return len;
+	}
+
+	for (i = 0; i < alg_type_end; i++)
+	{
+	    if (0 == strcmp(action, alg_list[i].name))
+	    {
+	        alg_list[i].enable = val;
+	        return len;
+	    }
+	}
+
+	printk("Error: Unkown command.\n");
+
+	return len;
+}
+
+int alg_single_open(struct inode *inode, struct file *file)
+{
+        return(single_open(file, proc_alg_debug_read, NULL));
+}
+
+static ssize_t alg_single_write(struct file * file, const char __user * userbuf,
+		     size_t count, loff_t * off)
+{
+	return proc_alg_debug_write(file, userbuf,count, off);
+}
+
+struct file_operations alg_proc_fops = {
+        .open           = alg_single_open,
+	 .write		= alg_single_write,
+        .read           = seq_read,
+        .llseek         = seq_lseek,
+        .release        = single_release,
+};
+#endif
+
 int nf_conntrack_init_start(void)
 {
 	int max_factor = 8;
@@ -1564,6 +2031,11 @@ int nf_conntrack_init_start(void)
 	ret = nf_conntrack_proto_init();
 	if (ret < 0)
 		goto err_proto;
+	
+#ifdef RTL_NF_ALG_CTL
+	proc_alg = proc_create_data("alg", 0, &proc_root,
+			 &alg_proc_fops, NULL);
+#endif
 
 	/* Set up fake conntrack: to never be deleted, not in any hashes */
 	for_each_possible_cpu(cpu) {
@@ -1573,6 +2045,12 @@ int nf_conntrack_init_start(void)
 	}
 	/*  - and look it like as a confirmed connection */
 	nf_ct_untracked_status_or(IPS_CONFIRMED | IPS_UNTRACKED);
+#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_threshold = (nf_conntrack_max * 4)/5;
+	if((nf_conntrack_max- rtl_nf_conntrack_threshold) > 64)
+		rtl_nf_conntrack_threshold = nf_conntrack_max-64;
+    rtl_nf_conntrack_init_hooks();
+#endif
 	return 0;
 
 err_proto:
@@ -1696,3 +2174,6 @@ s16 (*nf_ct_nat_offset)(const struct nf_conn *ct,
 			enum ip_conntrack_dir dir,
 			u32 seq);
 EXPORT_SYMBOL_GPL(nf_ct_nat_offset);
+
+
+

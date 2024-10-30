@@ -4,6 +4,7 @@
  * for more details.
  *
  * Copyright (C) 2000, 07 MIPS Technologies, Inc.
+ * Copyright (C) 2012 Tony Wu (tonywu@realtek.com)
  *
  * GIC Register Definitions
  *
@@ -13,13 +14,41 @@
 
 #undef	GICISBYTELITTLEENDIAN
 
+/* GIC's Nomenclature for Core Interrupt Pins */
+#define GIC_CPU_INT0			0 /* Core Interrupt 2 */
+#define GIC_CPU_INT1			1 /* Core Interrupt 3 */
+#define GIC_CPU_INT2			2 /* Core Interrupt 4 */
+#define GIC_CPU_INT3			3 /* Core Interrupt 5 */
+#define GIC_CPU_INT4			4 /* Core Interrupt 6 */
+#define GIC_CPU_INT5			5 /* Core Interrupt 7 */
+
+#define GIC_IRQ_BASE			0
+
+#define GIC_EXT_INTR(x)			x
+
+/* Add 2 to convert non-EIC hardware interrupt to EIC vector number. */
+#define GIC_CPU_TO_VEC_OFFSET	(2)
+
+/* Mapped interrupt to pin X, then GIC will generate the vector (X+1). */
+#define GIC_PIN_TO_VEC_OFFSET	(1)
+
 /* Constants */
 #define GIC_POL_POS			1
 #define GIC_POL_NEG			0
 #define GIC_TRIG_EDGE			1
 #define GIC_TRIG_LEVEL			0
 
+#ifdef CONFIG_RTL_8198C
+#define GIC_NUM_INTRS			(64)
+#else
 #define GIC_NUM_INTRS			(24 + NR_CPUS * 2)
+#endif
+
+#define GIC_IPI_RESCHED_BASE		(GIC_NUM_INTRS - NR_CPUS * 2)
+#define GIC_IPI_CALL_BASE		(GIC_NUM_INTRS - NR_CPUS)
+
+#define GIC_IPI_RESCHED(cpu)		(GIC_IPI_RESCHED_BASE + (cpu))
+#define GIC_IPI_CALL(cpu)		(GIC_IPI_CALL_BASE + (cpu))
 
 #define MSK(n) ((1 << (n)) - 1)
 #define REG32(addr)		(*(volatile unsigned int *) (addr))
@@ -40,19 +69,20 @@
 #ifdef GICISBYTELITTLEENDIAN
 #define GICREAD(reg, data)	((data) = (reg), (data) = le32_to_cpu(data))
 #define GICWRITE(reg, data)	((reg) = cpu_to_le32(data))
-#define GICBIS(reg, bits)			\
-	({unsigned int data;			\
-		GICREAD(reg, data);		\
-		data |= bits;			\
-		GICWRITE(reg, data);		\
-	})
+
 
 #else
 #define GICREAD(reg, data)	((data) = (reg))
 #define GICWRITE(reg, data)	((reg) = (data))
-#define GICBIS(reg, bits)	((reg) |= (bits))
 #endif
 
+#define GICBIS(reg, mask, bits)			\
+	do { u32 data;				\
+		GICREAD((reg), data);		\
+		data &= ~(mask);		\
+		data |= ((bits) & (mask));	\
+		GICWRITE((reg), data);		\
+	} while (0)
 
 /* GIC Address Space */
 #define SHARED_SECTION_OFS		0x0000
@@ -167,13 +197,14 @@
 #define GIC_SH_SET_POLARITY_OFS		0x0100
 #define GIC_SET_POLARITY(intr, pol) \
 	GICBIS(GIC_REG_ADDR(SHARED, GIC_SH_SET_POLARITY_OFS + \
-		GIC_INTR_OFS(intr)), (pol) << GIC_INTR_BIT(intr))
-
+	GIC_INTR_OFS(intr)), (1 << GIC_INTR_BIT(intr)), \
+		(pol) << GIC_INTR_BIT(intr))
 /* Triggering : Reset Value is always 0 */
 #define GIC_SH_SET_TRIGGER_OFS		0x0180
 #define GIC_SET_TRIGGER(intr, trig) \
 	GICBIS(GIC_REG_ADDR(SHARED, GIC_SH_SET_TRIGGER_OFS + \
-		GIC_INTR_OFS(intr)), (trig) << GIC_INTR_BIT(intr))
+	GIC_INTR_OFS(intr)), (1 << GIC_INTR_BIT(intr)), \
+		(trig) << GIC_INTR_BIT(intr))
 
 /* Mask manipulation */
 #define GIC_SH_SMASK_OFS		0x0380
@@ -319,15 +350,23 @@ struct gic_intrmask_regs {
  * Interrupt Meta-data specification. The ipiflag helps
  * in building ipi_map.
  */
+#define GIC_FLAG_SHARED_MASK	0x00ff
+#define GIC_FLAG_VPE_MASK	0xff00
+
+#define GIC_UNUSED		0xdead		/* Dummy data */
+#define GIC_FLAG_IPI		0x0001
+#define GIC_FLAG_TRANSPARENT	0x0002
+#define GIC_FLAG_VPE_SWINT0	0x0100		/* VPE local flags */
+#define GIC_FLAG_VPE_SWINT1	0x0200
+#define GIC_FLAG_VPE_TIMER	0x0400
+#define GIC_FLAG_VPE_PERFCTR	0x0800
+
 struct gic_intr_map {
 	unsigned int cpunum;	/* Directed to this CPU */
-#define GIC_UNUSED		0xdead			/* Dummy data */
 	unsigned int pin;	/* Directed to this Pin */
 	unsigned int polarity;	/* Polarity : +/-	*/
 	unsigned int trigtype;	/* Trigger  : Edge/Levl */
 	unsigned int flags;	/* Misc flags	*/
-#define GIC_FLAG_IPI	       0x01
-#define GIC_FLAG_TRANSPARENT   0x02
 };
 
 /*
@@ -341,23 +380,8 @@ struct gic_shared_intr_map {
 	unsigned int local_intr_mask;
 };
 
-/* GIC nomenclature for Core Interrupt Pins. */
-#define GIC_CPU_INT0		0 /* Core Interrupt 2 */
-#define GIC_CPU_INT1		1 /* .		      */
-#define GIC_CPU_INT2		2 /* .		      */
-#define GIC_CPU_INT3		3 /* .		      */
-#define GIC_CPU_INT4		4 /* .		      */
-#define GIC_CPU_INT5		5 /* Core Interrupt 5 */
-
-/* Local GIC interrupts. */
-#define GIC_INT_TMR		(GIC_CPU_INT5)
-#define GIC_INT_PERFCTR		(GIC_CPU_INT5)
-
-/* Add 2 to convert non-EIC hardware interrupt to EIC vector number. */
-#define GIC_CPU_TO_VEC_OFFSET	(2)
-
-/* Mapped interrupt to pin X, then GIC will generate the vector (X+1). */
-#define GIC_PIN_TO_VEC_OFFSET	(1)
+extern void gic_init(unsigned long gic_base_addr, unsigned long gic_base_size,
+		     struct gic_intr_map *intrmap, unsigned int irqbase);
 
 #include <linux/clocksource.h>
 #include <linux/irq.h>
@@ -369,17 +393,15 @@ extern unsigned int gic_irq_base;
 extern unsigned int gic_irq_flags[];
 extern struct gic_shared_intr_map gic_shared_intr_map[];
 
-extern void gic_init(unsigned long gic_base_addr,
-	unsigned long gic_addrspace_size, struct gic_intr_map *intrmap,
-	unsigned int intrmap_size, unsigned int irqbase);
 extern void gic_clocksource_init(unsigned int);
 extern unsigned int gic_compare_int (void);
 extern cycle_t gic_read_count(void);
 extern cycle_t gic_read_compare(void);
 extern void gic_write_compare(cycle_t cnt);
+extern void gic_setup_ipi(unsigned int *ipimap, unsigned int resched,
+			  unsigned int call);
+extern unsigned int gic_get_int(void);
 extern void gic_send_ipi(unsigned int intr);
-extern unsigned int plat_ipi_call_int_xlate(unsigned int);
-extern unsigned int plat_ipi_resched_int_xlate(unsigned int);
 extern void gic_bind_eic_interrupt(int irq, int set);
 extern unsigned int gic_get_timer_pending(void);
 extern unsigned int gic_get_int(void);

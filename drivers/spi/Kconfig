@@ -339,6 +339,11 @@ config SPI_PXA2XX
 config SPI_PXA2XX_PCI
 	def_tristate SPI_PXA2XX && PCI
 
+config SPI_SHEIPA
+	bool "Realtek SHEIPA SPI Controller"
+	help
+	  This is the driver for the SHEIPA SPI Controller.
+
 config SPI_RSPI
 	tristate "Renesas RSPI controller"
 	depends on SUPERH

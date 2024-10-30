@@ -29,6 +29,25 @@
 # define lockdep_softirq_exit()	do { current->softirq_context--; } while (0)
 # define INIT_TRACE_IRQFLAGS	.softirqs_enabled = 1,
 #else
+#ifdef CONFIG_RTL_DEBUG_COUNTER
+
+extern void rtl_trace_hardirqs_on(void);
+extern void rtl_trace_hardirqs_off(void);
+#define trace_hardirqs_on()		rtl_trace_hardirqs_on()
+#define trace_hardirqs_off()	rtl_trace_hardirqs_off()
+#define trace_softirqs_on(ip)		do { } while (0)
+#define trace_softirqs_off(ip)		do { } while (0)
+#define trace_hardirq_context(p)	0
+#define trace_softirq_context(p)	0
+#define trace_hardirqs_enabled(p)	0
+#define trace_softirqs_enabled(p)	0
+#define trace_hardirq_enter()		do { } while (0)
+#define trace_hardirq_exit()		do { } while (0)
+#define lockdep_softirq_enter()	do { } while (0)
+#define lockdep_softirq_exit()		do { } while (0)
+#define INIT_TRACE_IRQFLAGS
+
+#else
 # define trace_hardirqs_on()		do { } while (0)
 # define trace_hardirqs_off()		do { } while (0)
 # define trace_softirqs_on(ip)		do { } while (0)
@@ -42,6 +61,7 @@
 # define lockdep_softirq_enter()	do { } while (0)
 # define lockdep_softirq_exit()		do { } while (0)
 # define INIT_TRACE_IRQFLAGS
+#endif
 #endif
 
 #if defined(CONFIG_IRQSOFF_TRACER) || \
@@ -133,6 +153,56 @@
 
 #else /* !CONFIG_TRACE_IRQFLAGS_SUPPORT */
 
+#ifdef CONFIG_RTL_DEBUG_COUNTER
+
+extern void rtl_trace_hardirqs_on(void);
+extern void rtl_trace_hardirqs_off(void);
+
+#define local_irq_enable() \
+	do { rtl_trace_hardirqs_on(); raw_local_irq_enable(); } while (0)
+#define local_irq_disable() \
+	do { raw_local_irq_disable(); rtl_trace_hardirqs_off(); } while (0)
+#define local_irq_save(flags)				\
+	do {						\
+		raw_local_irq_save(flags);		\
+		rtl_trace_hardirqs_off();			\
+	} while (0)
+
+
+#define local_irq_restore(flags)			\
+	do {						\
+		if (raw_irqs_disabled_flags(flags)) {	\
+			raw_local_irq_restore(flags);	\
+			rtl_trace_hardirqs_off();		\
+		} else {				\
+			rtl_trace_hardirqs_on();		\
+			raw_local_irq_restore(flags);	\
+		}					\
+	} while (0)
+#define local_save_flags(flags)				\
+	do {						\
+		raw_local_save_flags(flags);		\
+	} while (0)
+
+#define irqs_disabled_flags(flags)			\
+	({						\
+		raw_irqs_disabled_flags(flags);		\
+	})
+
+#define irqs_disabled()					\
+	({						\
+		unsigned long _flags;			\
+		raw_local_save_flags(_flags);		\
+		raw_irqs_disabled_flags(_flags);	\
+	})
+
+#define safe_halt()				\
+	do {					\
+		rtl_trace_hardirqs_on();		\
+		raw_safe_halt();		\
+	} while (0)
+
+#else
 #define local_irq_enable()	do { raw_local_irq_enable(); } while (0)
 #define local_irq_disable()	do { raw_local_irq_disable(); } while (0)
 #define local_irq_save(flags)					\
@@ -145,6 +215,7 @@
 #define irqs_disabled_flags(flags) (raw_irqs_disabled_flags(flags))
 #define safe_halt()		do { raw_safe_halt(); } while (0)
 
+#endif /*CONFIG_RTL_DEBUG_COUNTER*/
 #endif /* CONFIG_TRACE_IRQFLAGS_SUPPORT */
 
 #endif

@@ -30,7 +30,8 @@ extern long __strnlen_user_asm(const char *s);
  * Core architecture code
  */
 #ifdef CONFIG_CPU_R4K_FPU
-EXPORT_SYMBOL_GPL(_save_fp);
+//HF
+//EXPORT_SYMBOL_GPL(_save_fp);
 #endif
 
 /*

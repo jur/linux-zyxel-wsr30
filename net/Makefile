@@ -70,3 +70,11 @@ obj-$(CONFIG_BATMAN_ADV)	+= batman-adv/
 obj-$(CONFIG_NFC)		+= nfc/
 obj-$(CONFIG_OPENVSWITCH)	+= openvswitch/
 obj-$(CONFIG_VSOCKETS)	+= vmw_vsock/
+ifeq ($(CONFIG_RTL_IPTABLES_FAST_PATH),y)
+obj-$(CONFIG_RTL_IPTABLES_FAST_PATH) += rtl/fastpath/
+endif
+ifeq ($(CONFIG_NET),y)
+ifeq ($(CONFIG_RTL_819X),y)
+obj-$(CONFIG_RTL_819X) += rtl/features/
+endif
+endif

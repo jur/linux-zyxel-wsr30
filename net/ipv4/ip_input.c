@@ -141,10 +141,124 @@
 #include <net/icmp.h>
 #include <net/raw.h>
 #include <net/checksum.h>
+#include <net/inetpeer.h>
 #include <linux/netfilter_ipv4.h>
 #include <net/xfrm.h>
 #include <linux/mroute.h>
 #include <linux/netlink.h>
+//#define CONFIG_RTL_USB_IP_HOST_SPEEDUP 1 
+#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
+int isUsbIp_Reserved(struct sk_buff *skb, unsigned int hooknum, int direction);
+unsigned int _lan_ip=0xC0A801FE;
+unsigned int _lan_mask=0xFFFFFF00;
+extern unsigned int _br0_ip;
+extern unsigned int _br0_mask;
+#define USBIP_PORT_NUM 445
+#define USBIP_PORT_NUM_1 139
+#define HTTP_PORT_NUM 80
+#define UWIFI_PORT_NUM 2379
+
+enum netfilter_hooks {
+	_PRE_ROUTING,
+	_LOCAL_IN,
+	_FORWARD,
+	_LOCAL_OUT,
+	_POST_ROUTING,
+	_NUMHOOKS
+};
+int isUsbIp_Reserved(struct sk_buff *skb, unsigned int hooknum, int direction)
+{
+	struct iphdr *iph;
+	struct tcphdr *th;
+	int ret=0;
+	//struct net_device       *Indev;
+	//struct net_device       *Outdev;
+
+	//Indev = skb->dev;
+	iph = ip_hdr(skb);
+	if (ntohs(iph->frag_off) & 0x3fff) /* Ignore fragment */
+		 return 0;
+	if(iph->protocol ==IPPROTO_TCP){
+		th=(void *) iph + iph->ihl*4;
+		if(hooknum==	_POST_ROUTING){
+		#if 0
+			//Outdev = skb_dst(skb)->dev;///skb->dst->dev;
+			//if(strcmp(Indev->name , Outdev->name))
+			if (iph->saddr != _br0_ip)		//fix jwj
+			{
+				return 0;
+			}
+		#else
+			if ((iph->daddr & _br0_mask) != (_br0_ip & _br0_mask)) {
+				return 0;
+			}
+		#endif
+		}
+		if(hooknum==	_PRE_ROUTING){
+			if(iph->daddr != _br0_ip){
+				return 0;
+			}
+		}
+
+#if 1
+	if (_br0_ip != 0 && skb->pkt_type== PACKET_HOST) {
+ 		short portnum;
+		if(direction==0) { //rx we check dest port
+			portnum = ntohs(th->dest);
+		}
+		else if (direction==1) { //tx we check src port
+			portnum = ntohs(th->source);
+		}
+
+		if (portnum==USBIP_PORT_NUM || portnum==USBIP_PORT_NUM_1 || portnum==UWIFI_PORT_NUM
+		#ifdef CONFIG_HTTP_FILE_SERVER_SUPPORT
+			|| portnum==HTTP_PORT_NUM
+		#endif
+			) {
+			ret=1;
+		}
+	}
+#else
+	#if !defined(CONFIG_HTTP_FILE_SERVER_SUPPORT)			
+		if(direction==0){ //rx we check dest port
+			if(_br0_ip != 0 && th->dest==USBIP_PORT_NUM && skb->pkt_type== PACKET_HOST)
+				ret=1;
+			if(_br0_ip != 0 && th->dest==USBIP_PORT_NUM_1 && skb->pkt_type== PACKET_HOST)
+				ret=1;
+			if(_br0_ip != 0 && th->dest==UWIFI_PORT_NUM && skb->pkt_type== PACKET_HOST)
+				ret=1;	
+
+		}
+		if(direction==1){ //tx we check src port
+			if(_br0_ip != 0 && th->source==USBIP_PORT_NUM && skb->pkt_type== PACKET_HOST)
+				ret=1;
+			if(_br0_ip != 0 && th->source==USBIP_PORT_NUM_1 && skb->pkt_type== PACKET_HOST)
+				ret=1;
+			if(_br0_ip != 0 && th->source==UWIFI_PORT_NUM && skb->pkt_type== PACKET_HOST)
+				ret=1;	
+
+		}
+	#else
+		if(direction==0){ //rx we check dest port
+			if(_br0_ip != 0 && (th->dest==USBIP_PORT_NUM || th->dest==HTTP_PORT_NUM) && skb->pkt_type== PACKET_HOST)
+				ret=1;
+			if(_br0_ip != 0 && (th->dest==USBIP_PORT_NUM_1 || th->dest==UWIFI_PORT_NUM) && skb->pkt_type== PACKET_HOST)
+				ret=1;
+		}
+		if(direction==1){ //tx we check src port
+			if(_br0_ip != 0 && (th->source==USBIP_PORT_NUM || th->source==HTTP_PORT_NUM) && skb->pkt_type== PACKET_HOST)
+				ret=1;
+			if(_br0_ip != 0 && (th->source==USBIP_PORT_NUM_1 || th->source==UWIFI_PORT_NUM) && skb->pkt_type== PACKET_HOST)
+				ret=1;	
+		}
+	#endif
+#endif
+	}
+	
+	return ret;
+}
+#endif
+
 
 /*
  *	Process Router Attention IP option (RFC 2113)
@@ -246,14 +360,45 @@ int ip_local_deliver(struct sk_buff *skb)
 	/*
 	 *	Reassemble IP fragments.
 	 */
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+	int vpn_port=0, decrypt_ret=0;
+#endif
 
 	if (ip_is_fragment(ip_hdr(skb))) {
 		if (ip_defrag(skb, IP_DEFRAG_LOCAL_DELIVER))
 			return 0;
 	}
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+extern int rtk_openvpn_fragment_hw_decrypto(struct sk_buff *skb);
+extern inline int get_openvpn_port(void);
+	vpn_port=get_openvpn_port();
+	//if(skb->len>1489 && ip_hdr(skb)->protocol==17 && *((unsigned short*)(skb->data+(ip_hdr(skb)->ihl)*4+2))==vpn_port) //dhcp
+	if(skb->len>1393 && ip_hdr(skb)->protocol==17 && *((unsigned short*)(skb->data+(ip_hdr(skb)->ihl)*4+2))==vpn_port) //pppoe
+	//if(skb->len>1300 && ip_hdr(skb)->protocol==17 && *((unsigned short*)(skb->data+(ip_hdr(skb)->ihl)*4+2))==vpn_port) //pppoe
+	{		
+		//printk("\n%s:%d recv openvpn fragment pkt!!! skb->len=%d\n",__FUNCTION__,__LINE__,skb->len);
+		decrypt_ret=rtk_openvpn_fragment_hw_decrypto(skb);
+		if(decrypt_ret<0)
+		{
+			kfree_skb(skb);
+			return NET_RX_DROP;
+		}
+		return NET_RX_SUCCESS;
+	}
+#endif
+
+#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
+	if(isUsbIp_Reserved(skb,NF_INET_LOCAL_IN, 0)==0){
+		return NF_HOOK(NFPROTO_IPV4, NF_INET_LOCAL_IN, skb, skb->dev, NULL, ip_local_deliver_finish);
+	}else{
+		return ip_local_deliver_finish(skb);
+	}
+
+#else
 
 	return NF_HOOK(NFPROTO_IPV4, NF_INET_LOCAL_IN, skb, skb->dev, NULL,
 		       ip_local_deliver_finish);
+#endif
 }
 
 static inline bool ip_rcv_options(struct sk_buff *skb)
@@ -312,6 +457,9 @@ static int ip_rcv_finish(struct sk_buff *skb)
 {
 	const struct iphdr *iph = ip_hdr(skb);
 	struct rtable *rt;
+#if defined (CONFIG_RTL_819X)
+	struct dst_entry * dst = NULL;
+#endif
 
 	if (sysctl_ip_early_demux && !skb_dst(skb) && skb->sk == NULL) {
 		const struct net_protocol *ipprot;
@@ -339,6 +487,32 @@ static int ip_rcv_finish(struct sk_buff *skb)
 			goto drop;
 		}
 	}
+
+#if defined (CONFIG_RTL_819X)
+	/*to fix guest can access local web ui*/
+	#include <linux/udp.h>
+	dst = skb_dst(skb);
+	if (dst&&dst->input == &ip_local_deliver) {
+		if (skb->__unused == 0xe5 && iph->protocol== IPPROTO_UDP) {
+			struct udphdr *hdr = (struct udphdr *)((u_int32_t *)iph + iph->ihl);
+			if (htons(hdr->dest) == 53 || htons(hdr->dest) == 67) // DNS Domain or dhcp
+				skb->__unused = 0;
+		}
+
+		if (skb->__unused == 0xe5 && iph->protocol== IPPROTO_TCP) {
+			struct udphdr *hdr = (struct udphdr *)((u_int32_t *)iph + iph->ihl);
+			if (htons(hdr->dest) == 52869) // IGD port
+				skb->__unused = 0;
+		}
+
+		if (skb->__unused == 0xe5 && iph->protocol== IPPROTO_ICMP) {
+			skb->__unused = 0;
+		}
+
+		if (skb->__unused == 0xe5)
+			goto drop;
+	}
+#endif
 
 #ifdef CONFIG_IP_ROUTE_CLASSID
 	if (unlikely(skb_dst(skb)->tclassid)) {
@@ -442,8 +616,21 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	/* Must drop socket now because of tproxy. */
 	skb_orphan(skb);
 
+	#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)
+	skb->original_dscp = ip_hdr(skb)->tos >> 2;
+	#endif
+	
+
+#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
+	if(isUsbIp_Reserved(skb,NF_INET_PRE_ROUTING, 0)==0){
+		return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING, skb, dev, NULL,ip_rcv_finish);
+	}else{
+		return ip_rcv_finish(skb);
+	}
+#else
 	return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);
+#endif
 
 csum_error:
 	IP_INC_STATS_BH(dev_net(dev), IPSTATS_MIB_CSUMERRORS);

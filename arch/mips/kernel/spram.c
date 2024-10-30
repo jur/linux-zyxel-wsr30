@@ -7,7 +7,11 @@
  * 2 of the License, or (at your option) any later version.
  *
  * Copyright (C) 2007, 2008 MIPS Technologies, Inc.
+ *
+ * Modified for RLX Linux for MIPS
+ * Copyright (C) 2008-2011 Tony Wu (tonywu@realtek.com)
  */
+#ifdef CONFIG_CPU_HAS_SPRAM
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
@@ -17,6 +21,8 @@
 #include <asm/mipsregs.h>
 #include <asm/r4kcache.h>
 #include <asm/hazards.h>
+
+#include <bspchip.h>
 
 /*
  * These definitions are correct for the 24K/34K/74K SPRAM sample
@@ -198,22 +204,16 @@ static __cpuinit void probe_spram(char *type,
 }
 void __cpuinit spram_config(void)
 {
-	struct cpuinfo_mips *c = &current_cpu_data;
 	unsigned int config0;
 
-	switch (c->cputype) {
-	case CPU_24K:
-	case CPU_34K:
-	case CPU_74K:
-	case CPU_1004K:
-		config0 = read_c0_config();
-		/* FIXME: addresses are Malta specific */
-		if (config0 & (1<<24)) {
-			probe_spram("ISPRAM", 0x1c000000,
-				    &ispram_load_tag, &ispram_store_tag);
-		}
-		if (config0 & (1<<23))
-			probe_spram("DSPRAM", 0x1c100000,
-				    &dspram_load_tag, &dspram_store_tag);
+	config0 = read_c0_config();
+	if (config0 & (1<<24) && BSP_ISRAM_BASE >= 0) {
+		probe_spram("ISPRAM", BSP_ISRAM_BASE,
+			    &ispram_load_tag, &ispram_store_tag);
+	}
+	if (config0 & (1<<23) && BSP_DSRAM_BASE >= 0) {
+		probe_spram("DSPRAM", BSP_DSRAM_BASE,
+			    &dspram_load_tag, &dspram_store_tag);
 	}
 }
+#endif

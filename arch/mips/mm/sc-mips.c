@@ -23,6 +23,11 @@
  */
 static void mips_sc_wback_inv(unsigned long addr, unsigned long size)
 {
+	__sync();
+	__sync();
+	__sync();
+	__sync();
+	__sync();
 	blast_scache_range(addr, addr + size);
 }
 
@@ -75,6 +80,7 @@ static inline int mips_sc_is_activated(struct cpuinfo_mips *c)
 	case CPU_34K:
 	case CPU_74K:
 	case CPU_1004K:
+	case CPU_1074K:
 	case CPU_BMIPS5000:
 		if (config2 & (1 << 12))
 			return 0;

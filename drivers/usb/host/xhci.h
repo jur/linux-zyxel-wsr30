@@ -1562,6 +1562,9 @@ static inline struct usb_hcd *xhci_to_hcd(struct xhci_hcd *xhci)
 #define XHCI_DEBUG	0
 #endif
 
+//#define REALTEK_ONCHIP_USB 1
+
+#if 0  //origial kernel
 #define xhci_dbg(xhci, fmt, args...) \
 	do { if (XHCI_DEBUG) dev_dbg(xhci_to_hcd(xhci)->self.controller , fmt , ## args); } while (0)
 #define xhci_info(xhci, fmt, args...) \
@@ -1572,7 +1575,33 @@ static inline struct usb_hcd *xhci_to_hcd(struct xhci_hcd *xhci)
 	dev_warn(xhci_to_hcd(xhci)->self.controller , fmt , ## args)
 #define xhci_warn_ratelimited(xhci, fmt, args...) \
 	dev_warn_ratelimited(xhci_to_hcd(xhci)->self.controller , fmt , ## args)
+#else
 
+#if 0   //wei add, show all
+#define xhci_dbg(xhci, fmt, args...) 	printk( fmt , ## args)
+#define xhci_info(xhci, fmt, args...) 	printk( fmt , ## args)
+#define xhci_err(xhci, fmt, args...) 	printk( fmt , ## args)
+#define xhci_warn(xhci, fmt, args...) 	printk( fmt , ## args)
+
+
+extern void dbdump(unsigned char * pData, int len);
+extern void dwdump(u32 * pData, int count);
+extern void dwdump_swap(u32 * pData, int count);
+#define WDBG printk
+
+#else  //wei add, show none
+#define xhci_dbg(xhci, fmt, args...) 	
+#define xhci_info(xhci, fmt, args...) 	
+#define xhci_err(xhci, fmt, args...) 	
+#define xhci_warn(xhci, fmt, args...) 	
+
+//#define dbdump(x, y) 
+//#define dwdump(x, y) 
+//#define dwdump_swap(x, y) 
+#define WDBG 
+#endif
+
+#endif
 /* TODO: copied from ehci.h - can be refactored? */
 /* xHCI spec says all registers are little endian */
 static inline unsigned int xhci_readl(const struct xhci_hcd *xhci,
@@ -1708,7 +1737,7 @@ void xhci_urb_free_priv(struct xhci_hcd *xhci, struct urb_priv *urb_priv);
 void xhci_free_command(struct xhci_hcd *xhci,
 		struct xhci_command *command);
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_XHCI_PCI
 /* xHCI PCI glue */
 int xhci_register_pci(void);
 void xhci_unregister_pci(void);
@@ -1717,8 +1746,7 @@ static inline int xhci_register_pci(void) { return 0; }
 static inline void xhci_unregister_pci(void) {}
 #endif
 
-#if defined(CONFIG_USB_XHCI_PLATFORM) \
-	|| defined(CONFIG_USB_XHCI_PLATFORM_MODULE)
+#if defined(CONFIG_USB_XHCI_PLATFORM)
 int xhci_register_plat(void);
 void xhci_unregister_plat(void);
 #else

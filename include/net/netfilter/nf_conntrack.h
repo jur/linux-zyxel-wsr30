@@ -49,6 +49,13 @@ union nf_conntrack_expect_proto {
 #define NF_CT_ASSERT(x)
 #endif
 
+#if defined(CONFIG_RTL_819X)
+#if defined(CONFIG_RTL_HARDWARE_NAT)
+#define CONFIG_RTL_HW_NAT_BYPASS_PKT 1
+#define RTL_HW_NAT_BYPASS_PKT_NUM	15
+#endif
+#endif
+
 struct nf_conntrack_helper;
 
 /* Must be kept in sync with the classes defined by helpers */
@@ -74,7 +81,9 @@ struct nf_conn_help {
 struct nf_conn {
 	/* Usage count in here is 1 for hash table/destruct timer, 1 per skb,
            plus 1 for any connection(s) we are `master' for */
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct nf_conntrack ct_general;
+#endif
 
 	spinlock_t lock;
 
@@ -99,15 +108,95 @@ struct nf_conn {
 	u_int32_t secmark;
 #endif
 
+#if defined(CONFIG_NETFILTER_XT_MATCH_LAYER7) || \
+    defined(CONFIG_NETFILTER_XT_MATCH_LAYER7_MODULE)
+	struct {
+		/*
+		 * e.g. "http". NULL before decision. "unknown" after decision
+		 * if no match.
+		 */
+		char *app_proto;
+		/*
+		 * application layer data so far. NULL after match decision.
+		 */
+		char *app_data;
+		unsigned int app_data_len;
+	} layer7;
+#endif
+
 	/* Extensions */
 	struct nf_ct_ext *ext;
 #ifdef CONFIG_NET_NS
 	struct net *ct_net;
 #endif
 
+	#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+       struct list_head 	state_tuple;
+	   char drop_flag;
+	   char removed;
+	#endif
+
+	#if defined(CONFIG_RTL_HW_NAT_BYPASS_PKT)
+	unsigned long count;
+	#endif
+	
 	/* Storage reserved for other modules, must be the last member */
 	union nf_conntrack_proto proto;
+	
 };
+extern int routerTypeFlag;
+
+//#define CONFIG_RTL_ROUTER_FAST_PATH 1
+#if defined (CONFIG_RTL_ROUTER_FAST_PATH)
+extern unsigned int _br0_ip;
+extern unsigned int _br0_mask;
+
+static inline int rtl_isRouterType(struct nf_conn *ct)
+{
+	if(((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip == ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip) &&
+	    (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip == ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip)))
+	    		return 1;
+	return 0;
+}
+
+static inline int rtl_isRouterTypeWantoLan(struct nf_conn * ct)
+{
+	if((ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip != _br0_ip) &&
+		((ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip & _br0_mask) == (_br0_ip & _br0_mask)) &&
+		((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip & _br0_mask) != (_br0_ip & _br0_mask)))
+			return 1;
+
+	return 0;
+}
+
+
+static inline int rtl_isNatTypeWantoLan(struct nf_conn* ct)
+{
+	if(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip== ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip)
+		return 1;
+
+	return 0;
+}
+
+static inline int rtl_isRouterTypeLantoWan(struct nf_conn* ct)
+{
+	if((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip != _br0_ip) &&
+	  	 ((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip & _br0_mask) == (_br0_ip & _br0_mask)) &&
+	 	 ((ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip & _br0_mask) != (_br0_ip & _br0_mask)))
+			return 1;
+
+	return 0;
+}
+
+static inline int rtl_isNatTypeLantoWan(struct nf_conn* ct)
+{
+	if (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip== ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip)
+		return 1;
+
+	return 0;
+}
+
+#endif
 
 static inline struct nf_conn *
 nf_ct_tuplehash_to_ctrack(const struct nf_conntrack_tuple_hash *hash)
@@ -150,6 +239,7 @@ nf_conntrack_tuple_taken(const struct nf_conntrack_tuple *tuple,
 			 const struct nf_conn *ignored_conntrack);
 
 /* Return conntrack_info and tuple hash for given skb. */
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 static inline struct nf_conn *
 nf_ct_get(const struct sk_buff *skb, enum ip_conntrack_info *ctinfo)
 {
@@ -163,6 +253,7 @@ static inline void nf_ct_put(struct nf_conn *ct)
 	NF_CT_ASSERT(ct);
 	nf_conntrack_put(&ct->ct_general);
 }
+#endif
 
 /* Protocol module loading */
 extern int nf_ct_l3proto_try_module_get(unsigned short l3proto);
@@ -197,6 +288,37 @@ extern void __nf_ct_refresh_acct(struct nf_conn *ct,
 				 const struct sk_buff *skb,
 				 unsigned long extra_jiffies,
 				 int do_acct);
+
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+extern void __nf_ct_refresh_acct_proto(void *ct,
+				      enum ip_conntrack_info ctinfo,
+				      const void *skb,
+				      unsigned long extra_jiffies,
+				      int do_acct,
+				      unsigned char proto,
+				      void * extra1,
+				      void * extra2);
+
+static inline void nf_ct_refresh_acct_tcp(struct nf_conn *ct,
+				      enum ip_conntrack_info ctinfo,
+				      const struct sk_buff *skb,
+				      unsigned long extra_jiffies,
+				      enum tcp_conntrack oldstate,
+				      enum tcp_conntrack newstate)
+{
+	__nf_ct_refresh_acct_proto(ct, ctinfo, skb, extra_jiffies, 1, 6, (void *)oldstate, (void *)newstate);
+}
+
+
+static inline void nf_ct_refresh_acct_udp(struct nf_conn *ct,
+				      enum ip_conntrack_info ctinfo,
+				      const struct sk_buff *skb,
+				      unsigned long extra_jiffies, char * status)
+{
+	__nf_ct_refresh_acct_proto(ct, ctinfo, skb, extra_jiffies, 1, 17, (void *)status, (void *)0);
+}
+#endif
+
 
 /* Refresh conntrack for this many jiffies and do accounting */
 static inline void nf_ct_refresh_acct(struct nf_conn *ct,
@@ -247,6 +369,21 @@ static inline struct nf_conn *nf_ct_untracked_get(void)
 }
 extern void nf_ct_untracked_status_or(unsigned long bits);
 
+#if defined(CONFIG_RTL_BATTLENET_ALG)
+#define BATTLENET_PORT 6112
+#define RTL_DEV_NAME_NUM(name,num)	name#num
+#define RTL_PS_PPP_NAME	"ppp"
+#define RTL_PS_PPP0_DEV_NAME RTL_DEV_NAME_NUM(RTL_PS_PPP_NAME,0)
+extern unsigned int wan_ip;
+extern unsigned int wan_mask;
+extern struct net_device *rtl865x_getBattleNetWanDev(void );
+extern int rtl865x_getBattleNetDevIpAndNetmask(struct net_device * dev, unsigned int *ipAddr, unsigned int *netMask );
+extern struct nf_conn *rtl_find_ct_by_tuple_src(struct nf_conntrack_tuple *tuple, int *flag);
+extern struct nf_conn *rtl_find_ct_by_tuple_dst(struct nf_conntrack_tuple *tuple, int *flag);
+
+#endif
+
+
 /* Iterate over all conntracks: if iter returns true, it's deleted. */
 extern void
 nf_ct_iterate_cleanup(struct net *net, int (*iter)(struct nf_conn *i, void *data), void *data);
@@ -284,6 +421,14 @@ static inline bool nf_is_loopback_packet(const struct sk_buff *skb)
 	return skb->dev && skb->skb_iif && skb->dev->flags & IFF_LOOPBACK;
 }
 
+#if defined(CONFIG_RTL_819X)
+/* by default disable */
+#if defined(CONFIG_FAST_PATH_SPI_ENABLED)
+#define FAST_PATH_SPI_ENABLED		1
+#endif
+#endif
+
+
 struct kernel_param;
 
 extern int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp);
@@ -297,5 +442,37 @@ void init_nf_conntrack_hash_rnd(void);
 
 #define MODULE_ALIAS_NFCT_HELPER(helper) \
         MODULE_ALIAS("nfct-helper-" helper)
+
+#define RTL_NF_ALG_CTL 1
+#ifdef RTL_NF_ALG_CTL
+extern int alg_enable(int type);
+
+enum alg_type
+{
+    alg_type_ftp,
+    alg_type_tftp,
+    alg_type_rtsp,
+    alg_type_pptp,
+    alg_type_l2tp,
+    alg_type_ipsec,
+    alg_type_sip,
+    alg_type_h323,
+    alg_type_end
+};
+
+struct alg_entry
+{
+    char *name;
+    int enable;
+};
+
+#define ALG_CTL_DEF(type, val)  [alg_type_##type] = {#type, val}
+
+#define ALG_CHECK_ONOFF(type)   \
+if (!alg_enable(type))\
+{\
+    return NF_DROP;\
+}
+#endif
 
 #endif /* _NF_CONNTRACK_H */

@@ -1585,8 +1585,10 @@ static void itd_link_urb(
 	}
 
 	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+#ifdef CONFIG_USB_EHCI_PCI
 		if (ehci->amd_pll_fix == 1)
 			usb_amd_quirk_pll_disable();
+#endif
 	}
 
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs++;
@@ -1713,8 +1715,10 @@ static bool itd_complete(struct ehci_hcd *ehci, struct ehci_itd *itd)
 
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs--;
 	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+#ifdef CONFIG_USB_EHCI_PCI
 		if (ehci->amd_pll_fix == 1)
 			usb_amd_quirk_pll_enable();
+#endif
 	}
 
 	if (unlikely(list_is_singular(&stream->td_list))) {
@@ -1995,8 +1999,10 @@ static void sitd_link_urb(
 	}
 
 	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+#ifdef CONFIG_USB_EHCI_PCI
 		if (ehci->amd_pll_fix == 1)
 			usb_amd_quirk_pll_disable();
+#endif
 	}
 
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs++;
@@ -2102,8 +2108,10 @@ static bool sitd_complete(struct ehci_hcd *ehci, struct ehci_sitd *sitd)
 
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs--;
 	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+#ifdef CONFIG_USB_EHCI_PCI
 		if (ehci->amd_pll_fix == 1)
 			usb_amd_quirk_pll_enable();
+#endif
 	}
 
 	if (list_is_singular(&stream->td_list)) {

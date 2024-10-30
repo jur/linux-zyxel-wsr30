@@ -588,6 +588,10 @@ static int h245_help(struct sk_buff *skb, unsigned int protoff,
 	int dataoff;
 	int ret;
 
+	#ifdef RTL_NF_ALG_CTL
+	ALG_CHECK_ONOFF(alg_type_h323);
+	#endif
+
 	/* Until there's been traffic both ways, don't look in packets. */
 	if (ctinfo != IP_CT_ESTABLISHED && ctinfo != IP_CT_ESTABLISHED_REPLY)
 		return NF_ACCEPT;
@@ -1162,6 +1166,10 @@ static int q931_help(struct sk_buff *skb, unsigned int protoff,
 	int datalen;
 	int dataoff;
 	int ret;
+
+	#ifdef RTL_NF_ALG_CTL
+	ALG_CHECK_ONOFF(alg_type_h323);
+	#endif
 
 	/* Until there's been traffic both ways, don't look in packets. */
 	if (ctinfo != IP_CT_ESTABLISHED && ctinfo != IP_CT_ESTABLISHED_REPLY)
@@ -1765,6 +1773,10 @@ static int ras_help(struct sk_buff *skb, unsigned int protoff,
 	unsigned char *data;
 	int datalen = 0;
 	int ret;
+
+	#ifdef RTL_NF_ALG_CTL
+	ALG_CHECK_ONOFF(alg_type_h323);
+	#endif
 
 	pr_debug("nf_ct_ras: skblen = %u\n", skb->len);
 

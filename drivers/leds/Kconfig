@@ -201,6 +201,13 @@ config LEDS_LP55XX_COMMON
 	  This option supports common operations for LP5521 and LP5523/55231
 	  devices.
 
+config LEDS_LP55XX_COMMON_DISABLE_RESET_AND_ENABLE
+	bool "Disable reset and enable action when loading driver"
+	depends on LEDS_LP55XX_COMMON
+	help
+	  Don't execute reset and enable actions when lp55xx driver loading.
+
+
 config LEDS_LP5521
 	tristate "LED Support for N.S. LP5521 LED driver chip"
 	depends on LEDS_CLASS && I2C
@@ -222,6 +229,16 @@ config LEDS_LP5523
 	  Driver provides direct control via LED class and interface for
 	  programming the engines.
 
+config LEDS_LP5523_PREDEFINED_PATTERNS
+	bool "LP5523 predefined pattern support"
+	depends on LEDS_LP5523
+
+config LEDS_LP5523_EXTENDED_FW
+	bool "LP5523 extended fw loading"
+	depends on LEDS_LP5523
+	help
+	  Enable triple engines fw loading to run engines.
+
 config LEDS_LP5562
 	tristate "LED Support for TI LP5562 LED driver chip"
 	depends on LEDS_CLASS && I2C
@@ -231,6 +248,12 @@ config LEDS_LP5562
 	  It is 4 channels chip with programmable engines.
 	  Driver provides direct control via LED class and interface for
 	  programming the engines.
+
+config ZYXEL_LEDS_LP5562_W_PRED_PAT
+	bool "W LED predefined pattern support"
+	depends on LEDS_LP5562
+	help
+	  Support W LED predefined pattern.
 
 config LEDS_LP8788
 	tristate "LED support for the TI LP8788 PMIC"

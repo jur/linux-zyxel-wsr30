@@ -52,12 +52,7 @@ EXPORT_SYMBOL(PCI_DMA_BUS_IS_PHYS);
 
 /*
  * Setup information
- *
- * These are initialized so they are in the .data section
  */
-unsigned long mips_machtype __read_mostly = MACH_UNKNOWN;
-
-EXPORT_SYMBOL(mips_machtype);
 
 struct boot_mem_map boot_mem_map;
 
@@ -554,10 +549,10 @@ static void __init arch_mem_addpart(phys_t mem, phys_t end, int type)
 
 static void __init arch_mem_init(char **cmdline_p)
 {
-	extern void plat_mem_setup(void);
+	extern void bsp_setup(void);
 
 	/* call board setup routine */
-	plat_mem_setup();
+	bsp_setup();
 
 	/*
 	 * Make sure all kernel memory is in the maps.  The "UP" and
@@ -725,14 +720,14 @@ static void __init resource_init(void)
 
 void __init setup_arch(char **cmdline_p)
 {
+	extern void bsp_init(void);
 	cpu_probe();
-	prom_init();
+	bsp_init();
 
-#ifdef CONFIG_EARLY_PRINTK
+#if defined(CONFIG_EARLY_PRINTK)
 	setup_early_printk();
 #endif
 	cpu_report();
-	check_bugs_early();
 
 #if defined(CONFIG_VT)
 #if defined(CONFIG_VGA_CONSOLE)

@@ -593,6 +593,11 @@ ctnetlink_nlmsg_size(const struct nf_conn *ct)
 	       + 2 * nla_total_size(0) /* CTA_NAT_SEQ_ADJ_ORIG|REPL */
 	       + 6 * nla_total_size(sizeof(u_int32_t)) /* CTA_NAT_SEQ_OFFSET */
 #endif
+#ifdef CONFIG_NF_CT_ACCT
+		+ 2 * nla_total_size(0)		/* CTA_COUNTERS_ORIG|REPL */
+		+ 2 * nla_total_size(sizeof(uint64_t))	/* CTA_COUNTERS_PACKETS */
+		+ 2 * nla_total_size(sizeof(uint64_t))	/* CTA_COUNTERS_BYTES */
+#endif
 #ifdef CONFIG_NF_CONNTRACK_MARK
 	       + nla_total_size(sizeof(u_int32_t)) /* CTA_MARK */
 #endif

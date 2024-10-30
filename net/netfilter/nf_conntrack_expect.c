@@ -106,6 +106,40 @@ __nf_ct_expect_find(struct net *net, u16 zone,
 }
 EXPORT_SYMBOL_GPL(__nf_ct_expect_find);
 
+#if defined(CONFIG_IP_NF_TARGET_CONENAT)
+#include <linux/list.h>
+static inline int
+exp_src_cmp(const struct nf_conntrack_expect * exp,
+	    const struct nf_conntrack_tuple * tp)
+{
+	return	exp->saved_addr.ip == tp->src.u3.ip &&
+			exp->saved_proto.udp.port == tp->src.u.udp.port &&
+			exp->tuple.dst.protonum == tp->dst.protonum;
+}
+
+struct nf_conntrack_expect *
+__nf_ct_expect_find_bysave(struct net *net, const struct nf_conntrack_tuple *tupleMake, const struct nf_conntrack_tuple *tuple)
+{
+	struct nf_conntrack_expect *i;
+	unsigned int h;
+
+	if (!net->ct.expect_count)
+		return NULL;
+
+	h = nf_ct_expect_dst_hash(tupleMake);
+
+	hlist_for_each_entry(i, &net->ct.expect_hash[h], hnode) {
+
+		if (exp_src_cmp(i, tuple)){
+				return i;
+			}
+	}
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(__nf_ct_expect_find_bysave);
+#endif
+
+
 /* Just find a expectation corresponding to a tuple. */
 struct nf_conntrack_expect *
 nf_ct_expect_find_get(struct net *net, u16 zone,

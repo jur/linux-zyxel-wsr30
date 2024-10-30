@@ -128,15 +128,25 @@ static int i2c_get_gpios_for_recovery(struct i2c_adapter *adap)
 	struct device *dev = &adap->dev;
 	int ret = 0;
 
-	ret = gpio_request_one(bri->scl_gpio, GPIOF_OPEN_DRAIN |
-			GPIOF_OUT_INIT_HIGH, "i2c-scl");
+	#ifdef CONFIG_I2C_DESIGNWARE_PLATFORM
+	ret = gpio_request_one(bri->scl_gpio, GPIOF_OUT_INIT_HIGH | GPIOF_EXPORT_DIR_FIXED, "i2c-scl");
+	#else
+	ret = gpio_request_one(bri->scl_gpio, GPIOF_OPEN_DRAIN | GPIOF_OUT_INIT_HIGH, "i2c-scl");
+	#endif
+	
 	if (ret) {
 		dev_warn(dev, "Can't get SCL gpio: %d\n", bri->scl_gpio);
 		return ret;
 	}
 
 	if (bri->get_sda) {
-		if (gpio_request_one(bri->sda_gpio, GPIOF_IN, "i2c-sda")) {
+		int gpio_conf = GPIOF_IN;
+		
+		#ifdef CONFIG_I2C_DESIGNWARE_PLATFORM
+				gpio_conf = GPIOF_IN | GPIOF_EXPORT_DIR_FIXED;
+		#endif
+		
+		if (gpio_request_one(bri->sda_gpio, gpio_conf, "i2c-sda")) {
 			/* work without SDA polling */
 			dev_warn(dev, "Can't get SDA gpio: %d. Not using SDA polling\n",
 					bri->sda_gpio);
@@ -2117,6 +2127,7 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 	int i;
 	u8 partial_pec = 0;
 	int status;
+
 	struct i2c_msg msg[2] = {
 		{
 			.addr = addr,
@@ -2128,10 +2139,11 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 			.flags = flags | I2C_M_RD,
 			.len = 0,
 			.buf = msgbuf1,
-		},
+		}, 
 	};
 
 	msgbuf0[0] = command;
+
 	switch (size) {
 	case I2C_SMBUS_QUICK:
 		msg[0].len = 0;
@@ -2239,7 +2251,7 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 		if (msg[num-1].flags & I2C_M_RD)
 			msg[num-1].len++;
 	}
-
+	
 	status = i2c_transfer(adapter, msg, num);
 	if (status < 0)
 		return status;

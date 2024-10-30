@@ -523,6 +523,10 @@ conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff,
 	int ret;
 	u_int16_t msg;
 
+	#ifdef RTL_NF_ALG_CTL
+	ALG_CHECK_ONOFF(alg_type_pptp);
+	#endif
+	
 	/* don't do any tracking before tcp handshake complete */
 	if (ctinfo != IP_CT_ESTABLISHED && ctinfo != IP_CT_ESTABLISHED_REPLY)
 		return NF_ACCEPT;

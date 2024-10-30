@@ -64,6 +64,7 @@ do {									\
 		ll_bit = 0;						\
 } while (0)
 
+#ifdef CONFIG_CPU_HAS_FPU
 #define switch_to(prev, next, last)					\
 do {									\
 	u32 __usedfpu;							\
@@ -74,6 +75,15 @@ do {									\
 	__usedfpu = test_and_clear_tsk_thread_flag(prev, TIF_USEDFPU);	\
 	(last) = resume(prev, next, task_thread_info(next), __usedfpu); \
 } while (0)
+#else
+#define switch_to(prev, next, last)					\
+do {									\
+	if (cpu_has_dsp)						\
+		__save_dsp(prev);					\
+	__clear_software_ll_bit();					\
+	(last) = resume(prev, next, task_thread_info(next), 0);		\
+} while (0)
+#endif
 
 #define finish_arch_switch(prev)					\
 do {									\

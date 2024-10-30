@@ -8,6 +8,7 @@
  * Copyright (C) 1999, 2000 Silicon Graphics, Inc.
  */
 #include <linux/cache.h>
+#include <linux/context_tracking.h>
 #include <linux/irqflags.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -39,6 +40,7 @@
 
 #include "signal-common.h"
 
+#ifdef CONFIG_CPU_HAS_FPU
 static int (*save_fp_context)(struct sigcontext __user *sc);
 static int (*restore_fp_context)(struct sigcontext __user *sc);
 
@@ -47,6 +49,7 @@ extern asmlinkage int _restore_fp_context(struct sigcontext __user *sc);
 
 extern asmlinkage int fpu_emulator_save_context(struct sigcontext __user *sc);
 extern asmlinkage int fpu_emulator_restore_context(struct sigcontext __user *sc);
+#endif
 
 struct sigframe {
 	u32 sf_ass[4];		/* argument save space for o32 */
@@ -65,6 +68,7 @@ struct rt_sigframe {
 /*
  * Helper routines
  */
+#ifdef CONFIG_CPU_HAS_FPU
 static int protected_save_fp_context(struct sigcontext __user *sc)
 {
 	int err;
@@ -104,12 +108,15 @@ static int protected_restore_fp_context(struct sigcontext __user *sc)
 	}
 	return err;
 }
+#endif
 
 int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 {
 	int err = 0;
 	int i;
+#ifdef CONFIG_CPU_HAS_FPU
 	unsigned int used_math;
+#endif
 
 	err |= __put_user(regs->cp0_epc, &sc->sc_pc);
 
@@ -122,6 +129,7 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 #endif
 	err |= __put_user(regs->hi, &sc->sc_mdhi);
 	err |= __put_user(regs->lo, &sc->sc_mdlo);
+#ifdef CONFIG_CPU_HAS_DSP
 	if (cpu_has_dsp) {
 		err |= __put_user(mfhi1(), &sc->sc_hi1);
 		err |= __put_user(mflo1(), &sc->sc_lo1);
@@ -131,7 +139,9 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		err |= __put_user(mflo3(), &sc->sc_lo3);
 		err |= __put_user(rddsp(DSP_MASK), &sc->sc_dsp);
 	}
+#endif
 
+#ifdef CONFIG_CPU_HAS_FPU
 	used_math = !!used_math();
 	err |= __put_user(used_math, &sc->sc_used_math);
 
@@ -142,9 +152,11 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		 */
 		err |= protected_save_fp_context(sc);
 	}
+#endif
 	return err;
 }
 
+#ifdef CONFIG_CPU_HAS_FPU
 int fpcsr_pending(unsigned int __user *fpcsr)
 {
 	int err, sig = 0;
@@ -175,11 +187,16 @@ check_and_restore_fp_context(struct sigcontext __user *sc)
 	err |= protected_restore_fp_context(sc);
 	return err ?: sig;
 }
+#endif
 
 int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 {
+#ifdef CONFIG_CPU_HAS_FPU
 	unsigned int used_math;
+#endif
+#ifdef CONFIG_CPU_HAS_DSP
 	unsigned long treg;
+#endif
 	int err = 0;
 	int i;
 
@@ -193,6 +210,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 #endif
 	err |= __get_user(regs->hi, &sc->sc_mdhi);
 	err |= __get_user(regs->lo, &sc->sc_mdlo);
+#ifdef CONFIG_CPU_HAS_DSP
 	if (cpu_has_dsp) {
 		err |= __get_user(treg, &sc->sc_hi1); mthi1(treg);
 		err |= __get_user(treg, &sc->sc_lo1); mtlo1(treg);
@@ -202,10 +220,12 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		err |= __get_user(treg, &sc->sc_lo3); mtlo3(treg);
 		err |= __get_user(treg, &sc->sc_dsp); wrdsp(treg, DSP_MASK);
 	}
+#endif
 
 	for (i = 1; i < 32; i++)
 		err |= __get_user(regs->regs[i], &sc->sc_regs[i]);
 
+#ifdef CONFIG_CPU_HAS_FPU
 	err |= __get_user(used_math, &sc->sc_used_math);
 	conditional_used_math(used_math);
 
@@ -217,6 +237,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		/* signal handler may have used FPU.  Give it up. */
 		lose_fpu(0);
 	}
+#endif
 
 	return err;
 }
@@ -573,6 +594,8 @@ asmlinkage void do_notify_resume(struct pt_regs *regs, void *unused,
 {
 	local_irq_enable();
 
+	user_exit();
+
 	/* deal with pending signal delivery */
 	if (thread_info_flags & _TIF_SIGPENDING)
 		do_signal(regs);
@@ -581,8 +604,11 @@ asmlinkage void do_notify_resume(struct pt_regs *regs, void *unused,
 		clear_thread_flag(TIF_NOTIFY_RESUME);
 		tracehook_notify_resume(regs);
 	}
+
+	user_enter();
 }
 
+#ifdef CONFIG_CPU_HAS_FPU
 #ifdef CONFIG_SMP
 static int smp_save_fp_context(struct sigcontext __user *sc)
 {
@@ -619,3 +645,4 @@ static int signal_setup(void)
 }
 
 arch_initcall(signal_setup);
+#endif

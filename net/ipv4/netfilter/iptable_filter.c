@@ -20,9 +20,16 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
 MODULE_DESCRIPTION("iptables filter table");
 
+#if defined(CONFIG_RTL_819X)
+#define FILTER_VALID_HOOKS ((1 << NF_INET_PRE_ROUTING) | \
+			    (1 << NF_INET_LOCAL_IN) | \
+			    (1 << NF_INET_FORWARD) | \
+			    (1 << NF_INET_LOCAL_OUT) )
+#else
 #define FILTER_VALID_HOOKS ((1 << NF_INET_LOCAL_IN) | \
 			    (1 << NF_INET_FORWARD) | \
 			    (1 << NF_INET_LOCAL_OUT))
+#endif
 
 static const struct xt_table packet_filter = {
 	.name		= "filter",

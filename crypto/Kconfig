@@ -111,7 +111,7 @@ config CRYPTO_USER
 config CRYPTO_MANAGER_DISABLE_TESTS
 	bool "Disable run-time self tests"
 	default y
-	depends on CRYPTO_MANAGER2
+	depends on CRYPTO_MANAGER2 && !CRYPTO_DEV_REALTEK_LINUX_SELFTEST
 	help
 	  Disable run-time self tests that normally take place at
 	  algorithm registration.

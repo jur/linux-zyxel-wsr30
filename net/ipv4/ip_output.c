@@ -79,6 +79,19 @@
 #include <linux/mroute.h>
 #include <linux/netlink.h>
 #include <linux/tcp.h>
+//#define CONFIG_RTL_USB_IP_HOST_SPEEDUP 1
+#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
+extern int isUsbIp_Reserved(struct sk_buff *skb, unsigned int hooknum, int direction);
+#endif
+
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+int ip_fragment_for_openvpn(struct sk_buff *skb, int (*output)(struct sk_buff *));
+extern inline int is_openvpn_fragment(struct sk_buff *skb);
+#endif
+
+#if defined(CONFIG_RTL_819X)
+extern void rtl_update_ps_neigh_confirm(struct neighbour *neigh);
+#endif
 
 int sysctl_ip_default_ttl __read_mostly = IPDEFTTL;
 EXPORT_SYMBOL(sysctl_ip_default_ttl);
@@ -97,8 +110,17 @@ int __ip_local_out(struct sk_buff *skb)
 
 	iph->tot_len = htons(skb->len);
 	ip_send_check(iph);
+#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
+	if(isUsbIp_Reserved(skb, NF_INET_LOCAL_OUT, 1)==0){
+		return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT, skb, NULL, skb_dst(skb)->dev,dst_output);
+	}else{
+		return dst_output(skb);
+	}
+	
+	#else
 	return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT, skb, NULL,
 		       skb_dst(skb)->dev, dst_output);
+        #endif	  
 }
 
 int ip_local_out(struct sk_buff *skb)
@@ -200,6 +222,10 @@ static inline int ip_finish_output2(struct sk_buff *skb)
 	if (!IS_ERR(neigh)) {
 		int res = dst_neigh_output(dst, neigh, skb);
 
+		#if defined(CONFIG_RTL_819X)
+		rtl_update_ps_neigh_confirm(neigh);
+		#endif
+
 		rcu_read_unlock_bh();
 		return res;
 	}
@@ -219,6 +245,60 @@ static inline int ip_skb_dst_mtu(struct sk_buff *skb)
 	       skb_dst(skb)->dev->mtu : dst_mtu(skb_dst(skb));
 }
 
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+static inline int ip_finish_output_for_openvpn2(struct sk_buff *skb)
+{	
+	extern int openvpn_fragment_fast_to_wan(struct sk_buff *skb);
+
+	return openvpn_fragment_fast_to_wan(skb);	
+}
+
+static inline int ip_finish_output_for_openvpn(struct sk_buff *skb)
+{	
+	struct flowi4 fl4;
+	struct rtable *rt;
+	struct iphdr *iph;
+	int encrypt_ret=0;
+
+	extern int rtk_openvpn_fragment_hw_encrypto(struct sk_buff **skb);
+	extern void build_skb_flow_key(struct flowi4 *fl4, const struct sk_buff *skb, const struct sock *sk);
+
+	encrypt_ret=rtk_openvpn_fragment_hw_encrypto(&skb);
+
+	if(encrypt_ret<0)
+	{
+		kfree_skb(skb);
+		return -EINVAL;
+	}
+	
+	//printk("\n%s:%d skb->dev->name=%s skb->len=%d\n",__FUNCTION__,__LINE__,skb->dev->name,skb->len);            
+	build_skb_flow_key(&fl4, skb,NULL);
+	rt=ip_route_output_key(dev_net(skb->dev), &fl4);	
+	skb_dst_drop(skb);
+	skb_dst_set(skb, &rt->dst);
+
+	ip_select_ident(skb, &rt->dst);
+	
+	//printk("\n%s:%d skb->dev->name=%s skb->len=%d\n",__FUNCTION__,__LINE__,skb->dev->name,skb->len);			
+	
+	//printk("\n%s:%d ip_skb_dst_mtu(skb)=%d\n",__FUNCTION__,__LINE__,ip_skb_dst_mtu(skb));			
+	if(skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb)) 
+	{
+		//return ip_fragment(skb, ip_finish_output2);
+		return ip_fragment(skb, ip_finish_output_for_openvpn2);
+	}
+	else
+	{
+	
+		iph = ip_hdr(skb);
+		//iph->id++;
+		//iph->frag_off=0;  //htons(IP_DF);
+		ip_send_check(iph);
+		//return ip_finish_output2(skb);	
+		return ip_finish_output_for_openvpn2(skb);
+	}
+}
+#endif
 static int ip_finish_output(struct sk_buff *skb)
 {
 #if defined(CONFIG_NETFILTER) && defined(CONFIG_XFRM)
@@ -228,8 +308,26 @@ static int ip_finish_output(struct sk_buff *skb)
 		return dst_output(skb);
 	}
 #endif
-	if (skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb))
+	if ((skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb)) 
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+		|| (strcmp(skb_dst(skb)->dev->name, "tun0")==0 && is_openvpn_fragment(skb))	
+#endif
+	)
+	{		
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+	        if(strcmp(skb_dst(skb)->dev->name, "tun0")==0)
+	        {	        	
+			//printk("\n%s:%d skb->dev->name=%s skb->len=%d\n",__FUNCTION__,__LINE__,skb->dev->name,skb->len);			  
+			//printk("\n%s:%d ip_skb_dst_mtu(skb)=%d\n",__FUNCTION__,__LINE__,ip_skb_dst_mtu(skb));			
+
+			if(skb->len <= ip_skb_dst_mtu(skb))
+				return ip_finish_output_for_openvpn(skb);
+			else
+				return ip_fragment_for_openvpn(skb, ip_finish_output_for_openvpn);	
+	        }
+#endif
 		return ip_fragment(skb, ip_finish_output2);
+	}
 	else
 		return ip_finish_output2(skb);
 }
@@ -304,9 +402,21 @@ int ip_output(struct sk_buff *skb)
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_IP);
 
+#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
+
+	if(isUsbIp_Reserved(skb, NF_INET_POST_ROUTING, 1)==0){
 	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb, NULL, dev,
 			    ip_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));
+	}else{
+		return ip_finish_output(skb);
+	}
+	
+	#else
+	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb, NULL, dev,
+			    ip_finish_output,
+			    !(IPCB(skb)->flags & IPSKB_REROUTED));
+#endif
 }
 
 /*
@@ -424,6 +534,35 @@ static void ip_copy_metadata(struct sk_buff *to, struct sk_buff *from)
 
 	/* Copy the flags to each fragment. */
 	IPCB(to)->flags = IPCB(from)->flags;
+
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	to->from_dev = from->from_dev;
+	to->vlan_member = from->vlan_member;
+#endif
+
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	to->switch_port = from->switch_port;
+#endif
+
+#if (defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN))&& defined(CONFIG_RTL_819X) 
+        to->srcPhyPort = from->srcPhyPort;
+#endif
+
+#if defined(CONFIG_RTL_QOS_8021P_SUPPORT)
+	to->srcVlanPriority = from->srcVlanPriority;
+#endif
+
+#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)			
+	to->original_dscp = from->original_dscp;
+#endif
+
+#if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
+ 	to->original_vlanpri = from->original_vlanpri;
+ #endif
+
+#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
+	to->passThruFlag = from->passThruFlag;
+#endif
 
 #ifdef CONFIG_NET_SCHED
 	to->tc_index = from->tc_index;
@@ -716,6 +855,292 @@ fail:
 }
 EXPORT_SYMBOL(ip_fragment);
 
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+int ip_fragment_for_openvpn(struct sk_buff *skb, int (*output)(struct sk_buff *))
+{	
+	struct iphdr *iph;
+	int ptr;
+	struct net_device *dev;
+	struct sk_buff *skb2;
+	unsigned int mtu, hlen, left, len, ll_rs;
+	int offset;
+	__be16 not_last_frag;
+
+	//if(skb->len<1500)
+	//	return output(skb);
+
+	struct rtable *rt = skb_rtable(skb);
+	
+	int err = 0;
+
+	dev = rt->dst.dev;
+	/*
+	 *	Point into the IP datagram header.
+	 */
+	iph = ip_hdr(skb);
+	if (unlikely(((iph->frag_off & htons(IP_DF)) && !skb->local_df) ||
+		     (IPCB(skb)->frag_max_size &&
+		      IPCB(skb)->frag_max_size > dst_mtu(&rt->dst)))) {
+		IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGFAILS);
+		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
+			  htonl(ip_skb_dst_mtu(skb)));
+		kfree_skb(skb);
+		return -EMSGSIZE;
+	}
+	/*
+	 *	Setup starting values.
+	 */
+
+	hlen = iph->ihl * 4;
+	
+	mtu = dst_mtu(&rt->dst) - hlen;	/* Size of data space */
+
+	//printk("\n######%s:%d########### mtu=%d\n",__FUNCTION__,__LINE__,mtu);
+#ifdef CONFIG_BRIDGE_NETFILTER
+	if (skb->nf_bridge)
+		mtu -= nf_bridge_mtu_reduction(skb);
+#endif
+	IPCB(skb)->flags |= IPSKB_FRAG_COMPLETE;
+
+	/* When frag_list is given, use it. First, check its validity:
+	 * some transformers could create wrong frag_list or break existing
+	 * one, it is not prohibited. In this case fall back to copying.
+	 *
+	 * LATER: this step can be merged to real generation of fragments,
+	 * we can switch to copy when see the first bad fragment.
+	 */
+	if (skb_has_frag_list(skb)) {
+		//printk("\n######%s:%d###skb->len=%d skb->data_len=%d\n",__FUNCTION__,__LINE__,skb->len,skb->data_len);
+		struct sk_buff *frag, *frag2;
+		int first_len = skb_pagelen(skb);		
+		//printk("\n######%s:%d###first_len=%d mtu=%d\n",__FUNCTION__,__LINE__,first_len,mtu);
+
+		if (first_len - hlen > mtu ||
+		    ((first_len - hlen) & 7) ||
+		    ip_is_fragment(iph) ||
+		    skb_cloned(skb))
+			goto slow_path;
+
+		skb_walk_frags(skb, frag) {
+			/* Correct geometry. */
+			if (frag->len > mtu ||
+			    ((frag->len & 7) && frag->next) ||
+			    skb_headroom(frag) < hlen)
+				goto slow_path_clean;
+
+			/* Partially cloned skb? */
+			if (skb_shared(frag))
+				goto slow_path_clean;
+
+			BUG_ON(frag->sk);
+			if (skb->sk) {
+				frag->sk = skb->sk;
+				frag->destructor = sock_wfree;
+			}
+			skb->truesize -= frag->truesize;
+		}
+
+		/* Everything is OK. Generate! */
+
+		err = 0;
+		offset = 0;
+		frag = skb_shinfo(skb)->frag_list;
+		skb_frag_list_init(skb);
+		skb->data_len = first_len - skb_headlen(skb);
+		skb->len = first_len;
+		iph->tot_len = htons(first_len);
+		iph->frag_off = htons(IP_MF);
+		ip_send_check(iph);
+
+		for (;;) {
+			/* Prepare header of the next frame,
+			 * before previous one went down. */
+			if (frag) {
+				frag->ip_summed = CHECKSUM_NONE;
+				skb_reset_transport_header(frag);
+				__skb_push(frag, hlen);
+				skb_reset_network_header(frag);
+				memcpy(skb_network_header(frag), iph, hlen);
+				iph = ip_hdr(frag);
+				iph->tot_len = htons(frag->len);
+				
+				//printk("\n######%s:%d###iph->tot_len=%d\n",__FUNCTION__,__LINE__,iph->tot_len);
+
+				ip_copy_metadata(frag, skb);
+				if (offset == 0)
+					ip_options_fragment(frag);
+				offset += skb->len - hlen;
+				iph->frag_off = htons(offset>>3);
+				if (frag->next != NULL)
+					iph->frag_off |= htons(IP_MF);
+				/* Ready, complete checksum */
+				ip_send_check(iph);
+			}
+			
+			err = output(skb);
+
+			if (!err)
+				IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGCREATES);
+			if (err || !frag)
+				break;
+
+			skb = frag;
+			frag = skb->next;
+			skb->next = NULL;
+		}
+
+		if (err == 0) {
+			IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGOKS);
+			return 0;
+		}
+
+		while (frag) {
+			skb = frag->next;
+			kfree_skb(frag);
+			frag = skb;
+		}
+		IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGFAILS);
+		return err;
+
+slow_path_clean:
+		skb_walk_frags(skb, frag2) {
+			if (frag2 == frag)
+				break;
+			frag2->sk = NULL;
+			frag2->destructor = NULL;
+			skb->truesize += frag2->truesize;
+		}
+	}
+
+slow_path:
+	/* for offloaded checksums cleanup checksum before fragmentation */
+	if ((skb->ip_summed == CHECKSUM_PARTIAL) && skb_checksum_help(skb))
+		goto fail;
+	iph = ip_hdr(skb);
+
+	left = skb->len - hlen;		/* Space per frame */
+	//printk("\n######%s:%d###########skb->len=%d hlen=%d\n",__FUNCTION__,__LINE__,skb->len,hlen);
+	ptr = hlen;		/* Where to start from */
+
+	/* for bridged IP traffic encapsulated inside f.e. a vlan header,
+	 * we need to make room for the encapsulating header
+	 */
+	ll_rs = LL_RESERVED_SPACE_EXTRA(rt->dst.dev, nf_bridge_pad(skb));
+
+	/*
+	 *	Fragment the datagram.
+	 */
+
+	offset = (ntohs(iph->frag_off) & IP_OFFSET) << 3;
+	not_last_frag = iph->frag_off & htons(IP_MF);
+
+	/*
+	 *	Keep copying data until we run out.
+	 */
+
+	while (left > 0) {
+		len = left;
+		/* IF: it doesn't fit, use 'mtu' - the data space left */
+		if (len > mtu)
+			len = mtu;
+		/* IF: we are not sending up to and including the packet end
+		   then align the next start on an eight byte boundary */
+		if (len < left)	{
+			len &= ~7;
+		}
+		/*
+		 *	Allocate buffer.
+		 */
+
+		if ((skb2 = alloc_skb(len+hlen+ll_rs, GFP_ATOMIC)) == NULL) {
+			NETDEBUG(KERN_INFO "IP: frag: no memory for new fragment!\n");
+			err = -ENOMEM;
+			goto fail;
+		}
+
+		/*
+		 *	Set up data on packet
+		 */
+
+		ip_copy_metadata(skb2, skb);
+		skb_reserve(skb2, ll_rs);
+		skb_put(skb2, len + hlen);
+		skb_reset_network_header(skb2);
+		skb2->transport_header = skb2->network_header + hlen;
+
+		/*
+		 *	Charge the memory for the fragment to any owner
+		 *	it might possess
+		 */
+
+		if (skb->sk)
+			skb_set_owner_w(skb2, skb->sk);
+
+		/*
+		 *	Copy the packet header into the new buffer.
+		 */
+
+		skb_copy_from_linear_data(skb, skb_network_header(skb2), hlen);
+
+		/*
+		 *	Copy a block of the IP datagram.
+		 */
+		if (skb_copy_bits(skb, ptr, skb_transport_header(skb2), len))
+			BUG();
+		left -= len;
+		//printk("\n######%s:%d###########len=%d\n",__FUNCTION__,__LINE__,len);
+
+		/*
+		 *	Fill in the new header fields.
+		 */
+		iph = ip_hdr(skb2);
+		iph->frag_off = htons((offset >> 3));
+		//printk("\n######%s:%d###########\n",__FUNCTION__,__LINE__);
+
+		/* ANK: dirty, but effective trick. Upgrade options only if
+		 * the segment to be fragmented was THE FIRST (otherwise,
+		 * options are already fixed) and make it ONCE
+		 * on the initial skb, so that all the following fragments
+		 * will inherit fixed options.
+		 */
+		if (offset == 0)
+			ip_options_fragment(skb);
+
+		/*
+		 *	Added AC : If we are fragmenting a fragment that's not the
+		 *		   last fragment then keep MF on each bit
+		 */
+		if (left > 0 || not_last_frag)
+			iph->frag_off |= htons(IP_MF);
+		ptr += len;
+		offset += len;
+
+		/*
+		 *	Put this fragment into the sending queue.
+		 */
+		iph->tot_len = htons(len + hlen);
+
+		ip_send_check(iph);
+
+		err = output(skb2);
+		if (err)
+			goto fail;
+
+		IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGCREATES);
+	}
+	//printk("\n######%s:%d###########\n",__FUNCTION__,__LINE__);
+	consume_skb(skb);
+	//printk("\n######%s:%d###########\n",__FUNCTION__,__LINE__);
+	IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGOKS);
+	return err;
+
+fail:
+	//printk("\n######%s:%d###########\n",__FUNCTION__,__LINE__);
+	kfree_skb(skb);
+	IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGFAILS);
+	return err;
+}
+#endif
 int
 ip_generic_getfrag(void *from, char *to, int offset, int len, int odd, struct sk_buff *skb)
 {

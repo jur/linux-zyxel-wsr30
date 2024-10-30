@@ -2182,6 +2182,11 @@ int ip6_mr_input(struct sk_buff *skb)
 		.flowi6_mark	= skb->mark,
 	};
 	int err;
+	
+#if defined (CONFIG_RTL_MLD_PROXY)
+	int vif_index = -1;
+	unsigned char origin_temp[16] = {0};
+#endif
 
 	err = ip6mr_fib_lookup(net, &fl6, &mrt);
 	if (err < 0) {
@@ -2190,8 +2195,19 @@ int ip6_mr_input(struct sk_buff *skb)
 	}
 
 	read_lock(&mrt_lock);
+	
+#if defined (CONFIG_RTL_MLD_PROXY)
+		vif_index=ip6mr_find_vif(mrt, skb->dev);
+		origin_temp[15] = (unsigned char)vif_index;
+		cache = ip6mr_cache_find(mrt, &origin_temp, &ipv6_hdr(skb)->daddr);
+		if (cache==NULL){
+			cache = ip6mr_cache_find(mrt, &ipv6_hdr(skb)->saddr, &ipv6_hdr(skb)->daddr);
+		}
+#else
 	cache = ip6mr_cache_find(mrt,
-				 &ipv6_hdr(skb)->saddr, &ipv6_hdr(skb)->daddr);
+				&ipv6_hdr(skb)->saddr, &ipv6_hdr(skb)->daddr);
+#endif
+
 	if (cache == NULL) {
 		int vif = ip6mr_find_vif(mrt, skb->dev);
 

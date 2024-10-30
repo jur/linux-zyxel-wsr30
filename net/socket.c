@@ -1013,6 +1013,21 @@ void dlci_ioctl_set(int (*hook) (unsigned int, void __user *))
 }
 EXPORT_SYMBOL(dlci_ioctl_set);
 
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+static DEFINE_MUTEX(smux_ioctl_mutex);
+static int (*smux_ioctl_hook) (void __user *arg);
+
+void smux_ioctl_set(int (*hook) (void __user *))
+{
+	mutex_lock(&smux_ioctl_mutex);
+	smux_ioctl_hook = hook;
+	mutex_unlock(&smux_ioctl_mutex);
+}
+
+EXPORT_SYMBOL(smux_ioctl_set);
+#endif /* CONFIG_RTL_ISP_MULTI_WAN_SUPPORT */
+
+
 static long sock_do_ioctl(struct net *net, struct socket *sock,
 				 unsigned int cmd, unsigned long arg)
 {
@@ -1081,6 +1096,17 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 				err = br_ioctl_hook(net, cmd, argp);
 			mutex_unlock(&br_ioctl_mutex);
 			break;
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+		case SIOCSIFSMUX:
+			err = -EFAULT;
+			if (!smux_ioctl_hook)
+				request_module("smux");
+			mutex_lock(&smux_ioctl_mutex);
+			if (smux_ioctl_hook)
+				err = smux_ioctl_hook(argp);
+			mutex_unlock(&smux_ioctl_mutex);
+			break;
+#endif
 		case SIOCGIFVLAN:
 		case SIOCSIFVLAN:
 			err = -ENOPKG;

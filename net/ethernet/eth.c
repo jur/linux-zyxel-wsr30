@@ -370,7 +370,11 @@ void ether_setup(struct net_device *dev)
 	dev->hard_header_len 	= ETH_HLEN;
 	dev->mtu		= ETH_DATA_LEN;
 	dev->addr_len		= ETH_ALEN;
+#if defined(CONFIG_RTL_819X)
+	dev->tx_queue_len	= 0;	/* reduce queue size for max free sdram	*/
+#else
 	dev->tx_queue_len	= 1000;	/* Ethernet wants good queues */
+#endif
 	dev->flags		= IFF_BROADCAST|IFF_MULTICAST;
 	dev->priv_flags		|= IFF_TX_SKB_SHARING;
 

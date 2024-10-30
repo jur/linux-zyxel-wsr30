@@ -130,7 +130,23 @@
 #include <linux/cpu_rmap.h>
 #include <linux/static_key.h>
 
+#if defined(CONFIG_RTL_BATTLENET_ALG)
+#include <net/rtl/rtl_nic.h>
+#endif
+
 #include "net-sysfs.h"
+
+#if	defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#include <net/rtl/features/rtl_ps_log.h>
+#endif
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+#include <net/rtl/rtl_multi_wan.h>
+#endif
+
+#if defined(CONFIG_RPS) && defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
+extern unsigned int _br0_ip;
+#endif
 
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
@@ -1376,6 +1392,16 @@ static int dev_close_many(struct list_head *head)
 	return 0;
 }
 
+#if defined(CONFIG_RTL_FAST_PPPOE)
+int clear_pppoe_info(char *ppp_dev, char *wan_dev, unsigned short sid,
+								unsigned int our_ip,unsigned int	peer_ip,
+								unsigned char * our_mac, unsigned char *peer_mac);
+#endif
+
+#if defined (CONFIG_RTL_PPPOE_DIRECT_REPLY)
+extern void clear_magicNum(void); 
+#endif
+
 /**
  *	dev_close - shutdown an interface.
  *	@dev: device to shutdown
@@ -1397,6 +1423,15 @@ int dev_close(struct net_device *dev)
 			return ret;
 
 		list_add(&dev->unreg_list, &single);
+#if defined(CONFIG_RTL_FAST_PPPOE)
+		clear_pppoe_info(dev->name,dev->name,0,0,0,NULL,NULL);
+#endif
+#if defined (CONFIG_RTL_PPPOE_DIRECT_REPLY)
+		if(strncmp(dev->name, "ppp", 3) ==0)
+		{
+			clear_magicNum(); 
+		}
+#endif
 		dev_close_many(&single);
 		list_del(&single);
 
@@ -2515,12 +2550,31 @@ static inline int skb_needs_linearize(struct sk_buff *skb,
 				!(features & NETIF_F_SG)));
 }
 
+#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+extern int fast_nat_fw;
+#endif
+#ifdef CONFIG_RTL_WLAN_DOS_FILTER
+extern int wlan_dos_filter_enabled;
+#endif
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+extern int ipMulticastFastFwd;
+#endif
+#endif
+
 int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			struct netdev_queue *txq)
 {
 	const struct net_device_ops *ops = dev->netdev_ops;
 	int rc = NETDEV_TX_OK;
 	unsigned int skb_len;
+
+#if defined(CONFIG_RTL_819X)
+	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)//&&defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+	if (fast_nat_fw)
+	#endif
+		rtl_dev_hard_start_xmit_hooks(skb, dev, txq);
+#endif
 
 	if (likely(!skb->next)) {
 		netdev_features_t features;
@@ -2540,8 +2594,9 @@ int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 					     vlan_tx_tag_get(skb));
 			if (unlikely(!skb))
 				goto out;
-
+            #if !defined(CONFIG_RTL_VLAN_8021Q)
 			skb->vlan_tci = 0;
+            #endif
 		}
 
 		/* If encapsulation offload request, verify we are testing
@@ -2621,7 +2676,11 @@ out_kfree_gso_skb:
 		return rc;
 	}
 out_kfree_skb:
+#ifdef CONFIG_RTL_819X
+	dev_kfree_skb_any(skb);
+#else
 	kfree_skb(skb);
+#endif
 out:
 	return rc;
 }
@@ -2795,6 +2854,13 @@ int dev_queue_xmit(struct sk_buff *skb)
 	rcu_read_lock_bh();
 
 	skb_update_prio(skb);
+	
+#if defined(CONFIG_RTL_819X)
+	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)//&&defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+	if (fast_nat_fw)
+	#endif
+		rtl_dev_queue_xmit_hooks(skb, dev);
+#endif
 
 	txq = netdev_pick_tx(dev, skb);
 	q = rcu_dereference_bh(txq->qdisc);
@@ -3122,6 +3188,12 @@ static int enqueue_to_backlog(struct sk_buff *skb, int cpu,
 	if (skb_queue_len(&sd->input_pkt_queue) <= netdev_max_backlog) {
 		if (skb_queue_len(&sd->input_pkt_queue)) {
 enqueue:
+			#if defined(CONFIG_RTL_8198C) && !defined(CONFIG_RTL_TRIBAND_SUPPORT)
+			if((*((volatile unsigned long *)(0xb8000000)) & 0xFFF) == 0x0) {
+				_dma_cache_wback_inv((unsigned long)skb, sizeof(struct sk_buff));			
+				skb = (struct sk_buff *)((unsigned long)skb | 0x20000000);
+			}
+			#endif
 			__skb_queue_tail(&sd->input_pkt_queue, skb);
 			input_queue_tail_incr_save(sd, qtail);
 			rps_unlock(sd);
@@ -3149,6 +3221,62 @@ enqueue:
 	return NET_RX_DROP;
 }
 
+#if defined(CONFIG_RTL_BATTLENET_ALG)
+extern int rtl865x_curOpMode;
+struct net_device *rtl865x_getBattleNetWanDev(void )
+{
+	struct net_device * wanDev=NULL;
+
+	if(rtl865x_curOpMode==GATEWAY_MODE)
+	{
+		wanDev=__dev_get_by_name(&init_net,"ppp0");
+		if(wanDev == NULL)
+			wanDev=__dev_get_by_name(&init_net,"eth1");
+	}
+	else if(rtl865x_curOpMode==WISP_MODE)
+	{
+		wanDev=__dev_get_by_name(&init_net,"wlan0");
+	}
+	else if(rtl865x_curOpMode==BRIDGE_MODE)
+	{
+		wanDev=__dev_get_by_name(&init_net,"br0");
+	}
+
+	return wanDev;
+}
+
+int rtl865x_getBattleNetDevIpAndNetmask(struct net_device * dev, unsigned int *ipAddr, unsigned int *netMask )
+{
+	struct in_device *in_dev;
+	struct in_ifaddr *ifap = NULL;
+
+	if((dev==NULL) || (ipAddr==NULL) || (netMask==NULL))
+	{
+		return FAILED;
+	}
+
+	*ipAddr=0;
+	*netMask=0;
+
+	in_dev=(struct net_device *)(dev->ip_ptr);
+	if (in_dev != NULL) {
+		for (ifap=in_dev->ifa_list; ifap != NULL; ifap=ifap->ifa_next) {
+			if (strcmp(dev->name, ifap->ifa_label) == 0){
+				*ipAddr = ifap->ifa_address;
+				*netMask = ifap->ifa_mask;
+				return SUCCESS;
+			}
+		}
+
+	}
+
+	return FAILED;
+
+}
+
+#endif
+
+
 /**
  *	netif_rx	-	post buffer to the network code
  *	@skb: buffer to post
@@ -3167,16 +3295,33 @@ enqueue:
 int netif_rx(struct sk_buff *skb)
 {
 	int ret;
+#if defined(CONFIG_RPS) && defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
+	struct iphdr *iph = (struct iphdr *)skb->data;
+#endif
 
 	/* if netpoll wants it, pretend we never saw it */
 	if (netpoll_rx(skb))
 		return NET_RX_DROP;
 
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	if(skb->dev->priv_flags & IFF_RSMUX) {
+		extern int rtl_smux_pkt_recv(struct sk_buff *skb, struct net_device *dev);
+		//atomic_inc(&skb->users);
+		rtl_smux_pkt_recv(skb, skb->dev);
+		return NET_RX_SUCCESS;
+	}
+#endif
+
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
 #ifdef CONFIG_RPS
-	if (static_key_false(&rps_needed)) {
+	#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
+	if ((static_key_false(&rps_needed)) && iph && (iph->daddr!=_br0_ip))
+	#else
+	if (static_key_false(&rps_needed)) 
+	#endif
+	{
 		struct rps_dev_flow voidflow, *rflow = &voidflow;
 		int cpu;
 
@@ -3442,8 +3587,41 @@ static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 	skb_reset_mac_len(skb);
 
 	pt_prev = NULL;
+#if	0//defined(CONFIG_RTL_819X)
+	extern unsigned int statistic_total;
+	extern unsigned int statistic_ps;
+	statistic_total++;
+#endif
 
 another_round:
+	
+#if	0//defined(CONFIG_RTL_819X)
+#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+#if defined (CONFIG_RTL_IGMP_PROXY_MULTIWAN)	
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+	if(rtl865x_ipMulticastFastFwd(skb)==0)
+	{
+		return NET_RX_SUCCESS;
+	}
+#endif
+#endif
+	if (0
+	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+		|| fast_nat_fw
+	#endif
+	#ifdef CONFIG_RTL_WLAN_DOS_FILTER
+		||wlan_dos_filter_enabled
+	#endif
+		)
+#endif
+	//panic_printk("0x%04x, 0x%04x\n", skb->protocol, cpu_to_be16(ETH_P_8021Q));
+#if defined(CONFIG_RTL_VLAN_8021Q)
+	if((skb->protocol!=cpu_to_be16(ETH_P_8021Q)) && (skb->protocol!=cpu_to_be16(ETH_P_8021AD)))
+#endif
+		if (rtl_netif_receive_skb_hooks(&skb)==RTL_PS_HOOKS_RETURN)
+			return NET_RX_SUCCESS;
+#endif
+	
 	skb->skb_iif = skb->dev->ifindex;
 
 	__this_cpu_inc(softnet_data.processed);
@@ -3494,6 +3672,10 @@ ncls:
 		else if (unlikely(!skb))
 			goto out;
 	}
+	
+#if	0//defined(CONFIG_RTL_819X)
+	statistic_ps++;
+#endif
 
 	rx_handler = rcu_dereference(skb->dev->rx_handler);
 	if (rx_handler) {
@@ -3560,6 +3742,10 @@ out:
 	return ret;
 }
 
+#if defined(CONFIG_RTL_IGMP_SNOOPING)
+int rtl865x_ipMulticastFastFwd(struct sk_buff * skb);
+#endif
+
 static int __netif_receive_skb(struct sk_buff *skb)
 {
 	int ret;
@@ -3579,11 +3765,45 @@ static int __netif_receive_skb(struct sk_buff *skb)
 		current->flags |= PF_MEMALLOC;
 		ret = __netif_receive_skb_core(skb, true);
 		tsk_restore_flags(current, pflags, PF_MEMALLOC);
-	} else
+	} else {
+	
+#if	defined(CONFIG_RTL_819X)
+#if defined(CONFIG_RTL_819X_SWCORE)
+        extern unsigned int statistic_total;
+        extern unsigned int statistic_ps;
+        statistic_total++;
+#endif		
+		#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+		
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+			if(rtl865x_ipMulticastFastFwd(skb)==0)
+			{
+				return NET_RX_SUCCESS;
+			}
+#endif
+		if (0
+			#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+			|| fast_nat_fw
+			#endif
+			#ifdef CONFIG_RTL_WLAN_DOS_FILTER
+			||wlan_dos_filter_enabled
+			#endif
+			)
+		#endif
+		if (rtl_netif_receive_skb_hooks(&skb)==RTL_PS_HOOKS_RETURN)
+			return NET_RX_SUCCESS;
+#if defined(CONFIG_RTL_819X_SWCORE)		
+        statistic_ps++;
+#endif
+#endif
+
 		ret = __netif_receive_skb_core(skb, false);
+	}
 
 	return ret;
 }
+
+
 
 /**
  *	netif_receive_skb - process receive buffer from network
@@ -3603,16 +3823,30 @@ static int __netif_receive_skb(struct sk_buff *skb)
 int netif_receive_skb(struct sk_buff *skb)
 {
 	int ret;
-
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
+#if defined(CONFIG_RPS) && defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
+	struct iphdr *iph = (struct iphdr *)skb->data;
+#endif
+
+#if 0
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+	if(rtl865x_ipMulticastFastFwd(skb)==0)
+	{
+		return NET_RX_SUCCESS;
+	}
+#endif
+#endif
 
 	if (skb_defer_rx_timestamp(skb))
 		return NET_RX_SUCCESS;
-
 	rcu_read_lock();
-
 #ifdef CONFIG_RPS
-	if (static_key_false(&rps_needed)) {
+	#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
+	if ((static_key_false(&rps_needed)) && iph && (iph->daddr!=_br0_ip))
+	#else
+	if (static_key_false(&rps_needed)) 
+	#endif
+	{
 		struct rps_dev_flow voidflow, *rflow = &voidflow;
 		int cpu = get_rps_cpu(skb->dev, skb, &rflow);
 
@@ -4035,7 +4269,12 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		unsigned int qlen;
 
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
-			rcu_read_lock();
+			#if defined(CONFIG_RTL_8198C) && !defined(CONFIG_RTL_TRIBAND_SUPPORT)
+			if((*((volatile unsigned long *)(0xb8000000)) & 0xFFF) == 0x0) {
+				skb = (struct sk_buff *)((unsigned long)skb & ~0x20000000);
+			}
+			#endif
+			rcu_read_lock();							
 			local_irq_enable();
 			__netif_receive_skb(skb);
 			rcu_read_unlock();

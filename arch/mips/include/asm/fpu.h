@@ -10,6 +10,7 @@
 #ifndef _ASM_FPU_H
 #define _ASM_FPU_H
 
+#ifdef CONFIG_CPU_HAS_FPU
 #include <linux/sched.h>
 #include <linux/thread_info.h>
 #include <linux/bitops.h>
@@ -141,5 +142,5 @@ static inline fpureg_t *get_fpu_regs(struct task_struct *tsk)
 
 	return tsk->thread.fpu.fpr;
 }
-
+#endif
 #endif /* _ASM_FPU_H */

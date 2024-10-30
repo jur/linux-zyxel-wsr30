@@ -405,12 +405,28 @@ config I2C_DESIGNWARE_PLATFORM
 	tristate "Synopsys DesignWare Platform"
 	depends on HAVE_CLK
 	select I2C_DESIGNWARE_CORE
+	select I2C_DEFAULT_PINMUX
 	help
 	  If you say yes to this option, support will be included for the
 	  Synopsys DesignWare I2C adapter. Only master mode is supported.
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-designware-platform.
+
+choice
+        prompt "Select DesignWare I2C PINMUX"
+        depends on I2C_DESIGNWARE_CORE
+        default I2C_DEFAULT_PINMUX
+        help
+                The pinmux sets are provided by 8197F without 8367r.
+
+config I2C_DEFAULT_PINMUX
+        bool "I2C0: TXCTL + RXCTL; I2C1: TXD1 + RXC"
+
+config I2C_PINMUX_2
+        bool "I2C0: TXCTL + RXCTL; I2C1: TXC + TXD0"
+endchoice
+
 
 config I2C_DESIGNWARE_PCI
 	tristate "Synopsys DesignWare PCI"
@@ -955,5 +971,28 @@ config SCx200_ACB
 
 	  This support is also available as a module.  If so, the module
 	  will be called scx200_acb.
+
+config RTL8198C_I2C
+	tristate "Support REALTEK 8198C I2C"
+	help
+	 Suppport REALTEK RTL8198C I2C
+
+config RTL8198C_I2C_SUPPORT_LEDS_LP5562
+	bool "Enable TI LP5526 support on RTL8198C I2C"
+	depends on RTL8198C_I2C
+	select NEW_LEDS
+	select LEDS_CLASS
+	select LEDS_LP5562
+	help
+	  TI LP5562 support on RTL8198C I2C.
+
+config RTL8198C_I2C_SUPPORT_LEDS_LP55231
+	bool "Enable TI LP55231 support on RTL8198C I2C"
+	depends on RTL8198C_I2C
+	select NEW_LEDS
+	select LEDS_CLASS
+	select LEDS_LP5523
+	help
+	  TI LP55231 support on RTL8198C I2C.
 
 endmenu

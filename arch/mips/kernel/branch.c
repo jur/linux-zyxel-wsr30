@@ -21,9 +21,9 @@
 
 /*
  * Calculate and return exception PC in case of branch delay slot
- * for microMIPS and MIPS16e. It does not clear the ISA mode bit.
+ * for MIPS16m and MIPS16e. It does not clear the ISA mode bit.
  */
-int __isa_exception_epc(struct pt_regs *regs)
+int __MIPS16_exception_epc(struct pt_regs *regs)
 {
 	unsigned short inst;
 	long epc = regs->cp0_epc;
@@ -40,21 +40,25 @@ int __isa_exception_epc(struct pt_regs *regs)
 			epc += 4;
 		else
 			epc += 2;
-	} else if (mm_insn_16bit(inst))
+	}
+#ifdef CONFIG_CPU_MICROMIPS
+	else if (mm_insn_16bit(inst))
 		epc += 2;
 	else
 		epc += 4;
+#endif
 
 	return epc;
 }
 
 /*
- * Compute return address and emulate branch in microMIPS mode after an
+ * Compute return address and emulate branch in MIPS16m mode after an
  * exception only. It does not handle compact branches/jumps and cannot
  * be used in interrupt context. (Compact branches/jumps do not cause
  * exceptions.)
  */
-int __microMIPS_compute_return_epc(struct pt_regs *regs)
+#ifdef CONFIG_CPU_MICROMIPS
+int __MIPS16m_compute_return_epc(struct pt_regs *regs)
 {
 	u16 __user *pc16;
 	u16 halfword;
@@ -105,6 +109,7 @@ sigsegv:
 	force_sig(SIGSEGV, current);
 	return -EFAULT;
 }
+#endif
 
 /*
  * Compute return address and emulate branch in MIPS16e mode after an
@@ -207,7 +212,12 @@ int __MIPS16e_compute_return_epc(struct pt_regs *regs)
 int __compute_return_epc_for_insn(struct pt_regs *regs,
 				   union mips_instruction insn)
 {
-	unsigned int bit, fcr31, dspcontrol;
+#ifdef CONFIG_CPU_HAS_FPU
+	unsigned int bit, fcr31;
+#endif
+#ifdef CONFIG_CPU_HAS_DSP
+	unsigned int dspcontrol;
+#endif
 	long epc = regs->cp0_epc;
 	int ret = 0;
 
@@ -279,6 +289,7 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 			regs->cp0_epc = epc;
 			break;
 
+#ifdef CONFIG_CPU_HAS_DSP
 		case bposge32_op:
 			if (!cpu_has_dsp)
 				goto sigill;
@@ -291,6 +302,7 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 				epc += 8;
 			regs->cp0_epc = epc;
 			break;
+#endif
 		}
 		break;
 
@@ -363,6 +375,7 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 	/*
 	 * And now the FPA/cp1 branch instructions.
 	 */
+#ifdef CONFIG_CPU_HAS_FPU
 	case cop1_op:
 		preempt_disable();
 		if (is_fpu_owner())
@@ -398,47 +411,17 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 			break;
 		}
 		break;
-#ifdef CONFIG_CPU_CAVIUM_OCTEON
-	case lwc2_op: /* This is bbit0 on Octeon */
-		if ((regs->regs[insn.i_format.rs] & (1ull<<insn.i_format.rt))
-		     == 0)
-			epc = epc + 4 + (insn.i_format.simmediate << 2);
-		else
-			epc += 8;
-		regs->cp0_epc = epc;
-		break;
-	case ldc2_op: /* This is bbit032 on Octeon */
-		if ((regs->regs[insn.i_format.rs] &
-		    (1ull<<(insn.i_format.rt+32))) == 0)
-			epc = epc + 4 + (insn.i_format.simmediate << 2);
-		else
-			epc += 8;
-		regs->cp0_epc = epc;
-		break;
-	case swc2_op: /* This is bbit1 on Octeon */
-		if (regs->regs[insn.i_format.rs] & (1ull<<insn.i_format.rt))
-			epc = epc + 4 + (insn.i_format.simmediate << 2);
-		else
-			epc += 8;
-		regs->cp0_epc = epc;
-		break;
-	case sdc2_op: /* This is bbit132 on Octeon */
-		if (regs->regs[insn.i_format.rs] &
-		    (1ull<<(insn.i_format.rt+32)))
-			epc = epc + 4 + (insn.i_format.simmediate << 2);
-		else
-			epc += 8;
-		regs->cp0_epc = epc;
-		break;
 #endif
 	}
 
 	return ret;
 
+#ifdef CONFIG_CPU_HAS_DSP
 sigill:
 	printk("%s: DSP branch but not DSP ASE - sending SIGBUS.\n", current->comm);
 	force_sig(SIGBUS, current);
 	return -EFAULT;
+#endif
 }
 EXPORT_SYMBOL_GPL(__compute_return_epc_for_insn);
 

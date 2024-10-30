@@ -6,6 +6,9 @@
 #define _CRYPTO_SHA_H
 
 #include <linux/types.h>
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
+#endif // CONFIG_CRYPTO_DEV_REALTEK
 
 #define SHA1_DIGEST_SIZE        20
 #define SHA1_BLOCK_SIZE         64
@@ -68,6 +71,9 @@ struct sha1_state {
 	u64 count;
 	u32 state[SHA1_DIGEST_SIZE / 4];
 	u8 buffer[SHA1_BLOCK_SIZE];
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct rtl_hash_ctx rtl_ctx;
+#endif
 };
 
 struct sha256_state {

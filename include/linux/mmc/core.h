@@ -96,7 +96,14 @@ struct mmc_command {
  */
 
 	unsigned int		cmd_timeout_ms;	/* in milliseconds */
-
+    /* liao ******************************************************************** */
+#define MMC_ERR_NONE        0
+#define MMC_ERR_TIMEOUT     1
+#define MMC_ERR_BADCRC      2
+#define MMC_ERR_RMOVE       3
+#define MMC_ERR_FAILED      4
+#define MMC_ERR_INVALID     5
+/* liao &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& */
 	struct mmc_data		*data;		/* data segment associated with cmd */
 	struct mmc_request	*mrq;		/* associated request */
 };
@@ -112,6 +119,11 @@ struct mmc_data {
 #define MMC_DATA_WRITE	(1 << 8)
 #define MMC_DATA_READ	(1 << 9)
 #define MMC_DATA_STREAM	(1 << 10)
+#define MMC_DATA_TUNING	(1 << 11)
+#define MMC_CMD_MICRON_60 (1 << 12)
+#define MMC_CMD_MICRON_61 (1 << 13)
+#define MMC_CMD_MICRON_62 (1 << 14)
+#define MMC_CMD_MICRON_63 (1 << 15)
 
 	unsigned int		bytes_xfered;
 

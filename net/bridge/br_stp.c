@@ -16,6 +16,12 @@
 #include "br_private.h"
 #include "br_private_stp.h"
 
+#if defined (CONFIG_RTL_STP) || defined(CONFIG_RTL_HW_STP)
+#include <net/rtl/rtl_nic.h>
+#include <net/rtl/rtk_stp.h>
+#include <net/rtl/rtk_vlan.h>
+#endif
+
 /* since time values in bpdu are in jiffies and then scaled (1/256)
  * before sending, make sure that is at least one STP tick.
  */
@@ -348,7 +354,16 @@ void br_config_bpdu_generation(struct net_bridge *br)
 	list_for_each_entry(p, &br->port_list, list) {
 		if (p->state != BR_STATE_DISABLED &&
 		    br_is_designated_port(p))
-			br_transmit_config(p);
+		   {
+				#if defined (CONFIG_RTL_STP) && !defined(CONFIG_RTL_MULTI_LAN_DEV)
+				// bpdu not tx at eth0, because bpdu tx at virtual device port0~3 mapping to physical port0~3
+				if((memcmp((void *)(p->dev->name), "eth", 4)==0)&&((memcmp((void *)(p->dev->name), RTL_DRV_LAN_P4_NETIF_NAME, strlen(RTL_DRV_LAN_P4_NETIF_NAME)))))
+					continue;
+				#endif
+				
+				br_transmit_config(p);
+
+			}
 	}
 }
 
@@ -386,8 +401,22 @@ static void br_make_blocking(struct net_bridge_port *p)
 		if (p->state == BR_STATE_FORWARDING ||
 		    p->state == BR_STATE_LEARNING)
 			br_topology_change_detection(p->br);
-
+		
 		p->state = BR_STATE_BLOCKING;
+		#if defined (CONFIG_RTL_STP)
+		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_BLOCKING);
+		#endif
+
+		#if defined(CONFIG_RTL_HW_STP)
+		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_BLOCKING);
+		#endif
+
+        #ifdef CONFIG_RTK_MESH
+        if(strstr(p->dev->name, "msh"))
+            br_signal_pathsel(p->br);
+        #endif
+
+        
 		br_log_state(p);
 		br_ifinfo_notify(RTM_NEWLINK, p);
 
@@ -405,12 +434,39 @@ static void br_make_forwarding(struct net_bridge_port *p)
 
 	if (br->stp_enabled == BR_NO_STP || br->forward_delay == 0) {
 		p->state = BR_STATE_FORWARDING;
+
+        #if defined (CONFIG_RTL_STP)
+		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_FORWARDING);
+        #endif
+				
+        #if defined(CONFIG_RTL_HW_STP)
+		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_FORWARDING);
+        #endif
+        
 		br_topology_change_detection(br);
 		del_timer(&p->forward_delay_timer);
 	} else if (br->stp_enabled == BR_KERNEL_STP)
+	{
 		p->state = BR_STATE_LISTENING;
+		#if defined (CONFIG_RTL_STP)
+		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_LISTENING);
+		#endif
+		
+		#if defined(CONFIG_RTL_HW_STP)
+		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_LISTENING);
+		#endif
+	}
 	else
+	{
 		p->state = BR_STATE_LEARNING;
+		#if defined (CONFIG_RTL_STP)
+		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_LEARNING);
+		#endif
+		
+		#if defined(CONFIG_RTL_HW_STP)
+		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_LEARNING);
+		#endif
+	}
 
 	br_multicast_enable_port(p);
 	br_log_state(p);
@@ -568,3 +624,77 @@ unlock:
 	spin_unlock_bh(&br->lock);
 	return err;
 }
+
+#if defined (CONFIG_RTL_STP)
+int rtl_setSpanningTreePortState(struct net_bridge_port *p, unsigned int state)
+{
+	int retval = SUCCESS, Port = -1, phyport = -1;
+	char name[IFNAMSIZ] = {0};
+
+	if (!p || !p->dev)
+		return FAILED;
+	
+	strcpy(name, p->dev->name);
+	Port = name[strlen(name)-1]-'0';
+	//if is ethernet interface, need to set hardware register.
+	if(!memcmp(p->dev->name,PORT_NAME_PREFIX, strlen(PORT_NAME_PREFIX)) || !memcmp(p->dev->name,ETH_NAME_PREFIX, strlen(ETH_NAME_PREFIX)))
+	{
+		#if 0
+		if (Port == 1) //eth1<-->port4
+			phyport = 4;
+		else if (Port == 0) //eth0<-->port0
+			phyport = 0;
+		else //eth2/eth3/eth4 <-->port1/port2/port3
+			phyport = Port - 1;
+		#endif
+		//get port by cp->portmask, in case of exchange port mask
+		phyport = rtl_get_phy_port_by_dev(p->dev);
+		//printk("%s %d phyport=%d name=%s state=%d\n", __FUNCTION__, __LINE__, phyport, p->dev->name,state);
+		if (phyport >= 0)
+		{
+			retval = rtl865x_setMulticastSpanningTreePortState(phyport , state);
+
+			retval = rtl865x_setSpanningTreePortState(phyport, state);
+		}
+	}
+
+	return retval;
+			
+}
+#endif
+#if defined(CONFIG_RTL_HW_STP)
+int rtl_sethwSpanningTreePortState(struct net_bridge_port *p, unsigned int state)
+{
+	int retval = SUCCESS, i = 0;
+	uint32 vid = 0, portMask = 0;
+	
+	if (!p || !p->dev)
+		return FAILED;
+	
+	//if(strcmp(p->dev->name,"eth0")==0)
+	if(memcmp(p->dev->name,"eth", 3)==0)
+		retval=rtl865x_getNetifVid("br0", &vid);
+	else
+		retval=rtl865x_getNetifVid(p->dev->name, &vid);
+	
+	if(retval==FAILED){
+//		printk("%s(%d): rtl865x_getNetifVid failed.\n",__FUNCTION__,__LINE__);
+	}
+	else{
+		portMask=rtl865x_getVlanPortMask(vid);
+		for ( i = 0 ; i < MAX_RTL_STP_PORT_WH; i ++ ){
+			if((1<<i)&portMask){
+				retval = rtl865x_setMulticastSpanningTreePortState(i , state);
+				if(retval==FAILED)
+					printk("%s(%d): rtl865x_setMulticastSpanningTreePortState port(%d) failed.\n",__FUNCTION__,__LINE__,i);
+				
+				retval = rtl865x_setSpanningTreePortState(i, state);
+				if(retval==FAILED)
+					printk("%s(%d): rtl865x_setSpanningTreePortState port(%d) failed.\n",__FUNCTION__,__LINE__,i);
+			}
+		}
+	}
+
+	return retval;
+}
+#endif

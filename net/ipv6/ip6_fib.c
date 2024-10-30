@@ -38,6 +38,10 @@
 #include <net/ip6_fib.h>
 #include <net/ip6_route.h>
 
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
 #define RT6_DEBUG 2
 
 #if RT6_DEBUG >= 3
@@ -955,6 +959,12 @@ out:
 #endif
 		dst_free(&rt->dst);
 	}
+	#if defined(CONFIG_RTL_819X)
+	else {
+		rtl8198c_fib6_add_hooks((void*)rt);
+	}
+	#endif
+
 	return err;
 
 #ifdef CONFIG_IPV6_SUBTREES
@@ -1350,6 +1360,10 @@ int fib6_del(struct rt6_info *rt, struct nl_info *info)
 
 	for (rtp = &fn->leaf; *rtp; rtp = &(*rtp)->dst.rt6_next) {
 		if (*rtp == rt) {
+			#if defined(CONFIG_RTL_819X)
+			rtl8198c_fib6_del_hooks((void*)rt);
+			#endif
+
 			fib6_del_route(fn, rtp, info);
 			return 0;
 		}

@@ -757,6 +757,10 @@ void do_exit(long code)
 		 */
 		tsk->flags |= PF_EXITPIDONE;
 		set_current_state(TASK_UNINTERRUPTIBLE);
+#if defined(CONFIG_RTL_WTDOG)
+		panic("Fixing recursive fault but reboot is needed!");
+		{ extern int is_fault; is_fault=1; } // set kernel fault flag	
+#endif		
 		schedule();
 	}
 
@@ -769,9 +773,15 @@ void do_exit(long code)
 	raw_spin_unlock_wait(&tsk->pi_lock);
 
 	if (unlikely(in_atomic()))
+{
 		printk(KERN_INFO "note: %s[%d] exited with preempt_count %d\n",
 				current->comm, task_pid_nr(current),
 				preempt_count());
+#if defined(CONFIG_RTL_WTDOG)
+		panic("note: %s[%d] exited with preempt_count %d\n", current->comm, current->pid, preempt_count());
+		{ extern int is_fault; is_fault=1; } // set kernel fault flag	
+#endif		
+}
 
 	acct_update_integrals(tsk);
 	/* sync mm's RSS info before statistics gathering */

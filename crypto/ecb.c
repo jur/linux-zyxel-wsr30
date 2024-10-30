@@ -18,8 +18,15 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+#include "../drivers/crypto/realtek/rtl_crypto_helper.h"
+#endif // CONFIG_CRYPTO_DEV_REALTEK
+
 struct crypto_ecb_ctx {
 	struct crypto_cipher *child;
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct rtl_cipher_ctx rtl_ctx;
+#endif
 };
 
 static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
@@ -35,6 +42,10 @@ static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
 	err = crypto_cipher_setkey(child, key, keylen);
 	crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
 				     CRYPTO_TFM_RES_MASK);
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	if (err == 0)
+		err = rtl_cipher_setkey(child, &ctx->rtl_ctx, key, keylen);
+#endif
 	return err;
 }
 
@@ -46,12 +57,29 @@ static int crypto_ecb_crypt(struct blkcipher_desc *desc,
 	int bsize = crypto_cipher_blocksize(tfm);
 	unsigned int nbytes;
 	int err;
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct crypto_ecb_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
+#endif
 
 	err = blkcipher_walk_virt(desc, walk);
 
 	while ((nbytes = walk->nbytes)) {
 		u8 *wsrc = walk->src.virt.addr;
 		u8 *wdst = walk->dst.virt.addr;
+
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+		if (ctx->rtl_ctx.mode >= 0)
+		{
+			nbytes = rtl_cipher_crypt(tfm,
+				fn == crypto_cipher_alg(tfm)->cia_encrypt,
+				&ctx->rtl_ctx, wsrc, nbytes,
+				walk->iv, wdst);
+			wsrc += (walk->nbytes - nbytes);
+			wdst += (walk->nbytes - nbytes);
+			err = blkcipher_walk_done(desc, walk, nbytes);
+			continue;
+		}
+#endif
 
 		do {
 			fn(crypto_cipher_tfm(tfm), wdst, wsrc);
@@ -106,6 +134,9 @@ static int crypto_ecb_init_tfm(struct crypto_tfm *tfm)
 		return PTR_ERR(cipher);
 
 	ctx->child = cipher;
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	rtl_cipher_init_ctx(tfm, &ctx->rtl_ctx);
+#endif
 	return 0;
 }
 

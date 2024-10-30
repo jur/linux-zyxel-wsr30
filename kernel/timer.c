@@ -1370,6 +1370,19 @@ static void run_timer_softirq(struct softirq_action *h)
 {
 	struct tvec_base *base = __this_cpu_read(tvec_bases);
 
+#if defined(CONFIG_RTL_WTDOG)
+#ifndef CONFIG_RTL_USERSPACE_WTDOG
+#ifdef CONFIG_RTK_VOIP
+    extern int bBspWatchdog;
+    *(volatile unsigned long *)(0xB800311c) |=
+                            ( bBspWatchdog ? ( 1 << 23 ) : ( ( 1 << 23 ) | ( 0xA5 << 24 ) ) );
+#else
+    *(volatile unsigned long *)(0xB800311c) |=  1 << 23;
+#endif
+#endif
+#endif
+
+
 	hrtimer_run_pending();
 
 	if (time_after_eq(jiffies, base->timer_jiffies))

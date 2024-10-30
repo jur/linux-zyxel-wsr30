@@ -13,6 +13,7 @@ endif
 
 # We need this, in case the user has it in its environment
 unexport CONFIG_
+quiet=silent_
 
 xconfig: $(obj)/qconf
 	$< $(Kconfig)
@@ -21,7 +22,7 @@ gconfig: $(obj)/gconf
 	$< $(Kconfig)
 
 menuconfig: $(obj)/mconf
-	$< $(Kconfig)
+	$(Q)$< $(Kconfig)
 
 config: $(obj)/conf
 	$< --oldaskconfig $(Kconfig)
@@ -34,7 +35,7 @@ oldconfig: $(obj)/conf
 
 silentoldconfig: $(obj)/conf
 	$(Q)mkdir -p include/generated
-	$< --$@ $(Kconfig)
+	$(Q)$< --$@ $(Kconfig)
 
 localyesconfig localmodconfig: $(obj)/streamline_config.pl $(obj)/conf
 	$(Q)mkdir -p include/generated

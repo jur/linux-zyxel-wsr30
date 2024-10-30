@@ -36,6 +36,10 @@ scripts/mod/devicetable-offsets.s: scripts/mod/devicetable-offsets.c FORCE
 
 $(obj)/$(devicetable-offsets-file): scripts/mod/devicetable-offsets.s
 	$(call cmd,offsets)
+TMPHOST		:= $(shell uname | tr '[:upper:]' '[:lower:]')
+ifeq ($(TMPHOST),darwin)
+HOSTLDFLAGS	+= -Wl,-no_pie
+endif
 
 targets += $(devicetable-offsets-file)
 

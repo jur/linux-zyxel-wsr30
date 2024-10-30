@@ -48,6 +48,9 @@ struct nf_conn_nat {
     defined(CONFIG_IP6_NF_TARGET_MASQUERADE_MODULE)
 	int masq_index;
 #endif
+#if defined(CONFIG_RTL_HARDWARE_NAT)
+	int hw_acc; /* 1: hardware acceleration, 0: software only */
+#endif
 };
 
 /* Set up the info structure to map into this range. */

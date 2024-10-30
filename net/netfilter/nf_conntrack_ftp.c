@@ -368,6 +368,10 @@ static int help(struct sk_buff *skb,
 	int found = 0, ends_in_nl;
 	typeof(nf_nat_ftp_hook) nf_nat_ftp;
 
+	#ifdef RTL_NF_ALG_CTL
+	ALG_CHECK_ONOFF(alg_type_ftp);
+	#endif
+
 	/* Until there's been traffic both ways, don't look in packets. */
 	if (ctinfo != IP_CT_ESTABLISHED &&
 	    ctinfo != IP_CT_ESTABLISHED_REPLY) {

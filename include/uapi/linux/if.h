@@ -83,7 +83,14 @@
 #define IFF_SUPP_NOFCS	0x80000		/* device supports sending custom FCS */
 #define IFF_LIVE_ADDR_CHANGE 0x100000	/* device supports hardware address
 					 * change when it's running */
-
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+#define IFF_RSMUX		0x200000		/* smux real interface, e.g. nas0*/
+#define IFF_OSMUX		0x400000		/* smux overlay interface, e.g. nas0_1*/
+#define IFF_VSMUX		0x800000		/* vlan tag enable on this smux overlay interface */
+#define IFF_DOMAIN_ELAN	0x1000000		/* ELAN interface		*/
+#define IFF_DOMAIN_WAN	0x2000000		/* WAN interface		*/
+#define IFF_DOMAIN_WLAN	0x4000000		/* WLAN interface		*/
+#endif
 
 #define IF_GET_IFACE	0x0001		/* for querying only */
 #define IF_GET_PROTO	0x0002

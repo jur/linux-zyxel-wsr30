@@ -47,6 +47,10 @@ static int tftp_help(struct sk_buff *skb,
 	unsigned int ret = NF_ACCEPT;
 	typeof(nf_nat_tftp_hook) nf_nat_tftp;
 
+	#ifdef RTL_NF_ALG_CTL
+	ALG_CHECK_ONOFF(alg_type_tftp);
+	#endif
+
 	tfh = skb_header_pointer(skb, protoff + sizeof(struct udphdr),
 				 sizeof(_tftph), &_tftph);
 	if (tfh == NULL)

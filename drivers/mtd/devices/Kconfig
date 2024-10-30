@@ -95,12 +95,54 @@ config MTD_M25P80
 	  if you want to specify device partitioning or to use a device which
 	  doesn't support the JEDEC ID instruction.
 
-config M25PXX_USE_FAST_READ
-	bool "Use FAST_READ OPCode allowing SPI CLK >= 50MHz"
+config M25PXX_USE_USER_MODE
+	bool "Support SPI User Mode for sheipa"
 	depends on MTD_M25P80
 	default y
 	help
+	  This option enables user mode to do write/read operation by ST M25Pxx.
+
+config M25PXX_USE_FAST_READ
+	bool "Use FAST_READ OPCode allowing SPI CLK >= 50MHz"
+	depends on MTD_M25P80
+	depends on M25PXX_USE_USER_MODE
+	default n
+	help
 	  This option enables FAST_READ access supported by ST M25Pxx.
+
+config M25PXX_USE_MULTI_CHANNEL
+	bool "Support Multi-channel write/read"
+	depends on MTD_M25P80
+	depends on M25PXX_USE_USER_MODE
+	default n
+	help
+	  This option enables Multi-channel write/read access supported by ST M25Pxx.
+
+config M25PXX_USE_QUAD
+	bool "Use QUAD OPCode allowing SPI do quad-channel write/read"
+	depends on !RTL_8197F
+	depends on MTD_M25P80
+	depends on M25PXX_USE_USER_MODE
+	depends on M25PXX_USE_MULTI_CHANNEL
+	default n
+	help
+	  This option enables quad-channel access supported by ST M25Pxx.
+
+config M25PXX_USE_DUAL
+	bool "Use DUAL OPCode allowing SPI do dual-channel write/read"
+	depends on MTD_M25P80
+	depends on M25PXX_USE_USER_MODE
+	depends on M25PXX_USE_MULTI_CHANNEL
+	default n
+	help
+	  This option enables dual-channel access supported by ST M25Pxx.
+
+config M25PXX_USE_AUTO_MODE
+	bool "Support SPI Auto Mode for sheipa"
+	depends on MTD_M25P80
+	default n
+	help
+	  This option enables auto mode to do auto write/read operation by ST M25Pxx.
 
 config MTD_SPEAR_SMI
 	tristate "SPEAR MTD NOR Support through SMI controller"

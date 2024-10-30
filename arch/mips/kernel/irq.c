@@ -92,6 +92,7 @@ asmlinkage void spurious_interrupt(void)
 
 void __init init_IRQ(void)
 {
+	extern void bsp_irq_init(void);
 	int i;
 
 #ifdef CONFIG_KGDB
@@ -102,7 +103,7 @@ void __init init_IRQ(void)
 	for (i = 0; i < NR_IRQS; i++)
 		irq_set_noprobe(i);
 
-	arch_init_irq();
+	bsp_irq_init();
 
 #ifdef CONFIG_KGDB
 	if (!kgdb_early_setup)

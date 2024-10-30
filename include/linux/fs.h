@@ -1269,6 +1269,11 @@ struct super_block {
 
 	struct sb_writers	s_writers;
 
+#ifdef CONFIG_RTL_SENDFILE_PATCH
+	int			s_frozen;
+	wait_queue_head_t	s_wait_unfrozen;
+#endif
+
 	char s_id[32];				/* Informational name */
 	u8 s_uuid[16];				/* UUID */
 

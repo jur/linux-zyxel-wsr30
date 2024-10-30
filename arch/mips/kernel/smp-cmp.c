@@ -32,11 +32,11 @@
 #include <asm/hardirq.h>
 #include <asm/mmu_context.h>
 #include <asm/smp.h>
+#include <asm/smp-boot.h>
 #include <asm/time.h>
 #include <asm/mipsregs.h>
 #include <asm/mipsmtregs.h>
 #include <asm/mips_mt.h>
-#include <asm/amon.h>
 #include <asm/gic.h>
 
 static void ipi_call_function(unsigned int cpu)
@@ -44,7 +44,7 @@ static void ipi_call_function(unsigned int cpu)
 	pr_debug("CPU%d: %s cpu %d status %08x\n",
 		 smp_processor_id(), __func__, cpu, read_c0_status());
 
-	gic_send_ipi(plat_ipi_call_int_xlate(cpu));
+	gic_send_ipi(GIC_IPI_CALL(cpu));
 }
 
 
@@ -53,7 +53,7 @@ static void ipi_resched(unsigned int cpu)
 	pr_debug("CPU%d: %s cpu %d status %08x\n",
 		 smp_processor_id(), __func__, cpu, read_c0_status());
 
-	gic_send_ipi(plat_ipi_resched_int_xlate(cpu));
+	gic_send_ipi(GIC_IPI_RESCHED(cpu));
 }
 
 /*
@@ -87,16 +87,12 @@ static void cmp_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 		cmp_send_ipi_single(i, action);
 }
 
-static void cmp_init_secondary(void)
+static void __cpuinit cmp_init_secondary(void)
 {
+	extern void bsp_smp_init_secondary(void);
 	struct cpuinfo_mips *c = &current_cpu_data;
 
-	/* Assume GIC is present */
-	change_c0_status(ST0_IM, STATUSF_IP3 | STATUSF_IP4 | STATUSF_IP6 |
-				 STATUSF_IP7);
-
 	/* Enable per-cpu interrupts: platform specific */
-
 	c->core = (read_c0_ebase() >> 1) & 0x1ff;
 #if defined(CONFIG_MIPS_MT_SMP) || defined(CONFIG_MIPS_MT_SMTC)
 	c->vpe_id = (read_c0_tcbind() >> TCBIND_CURVPE_SHIFT) & TCBIND_CURVPE;
@@ -104,6 +100,9 @@ static void cmp_init_secondary(void)
 #ifdef CONFIG_MIPS_MT_SMTC
 	c->tc_id  = (read_c0_tcbind() & TCBIND_CURTC) >> TCBIND_CURTC_SHIFT;
 #endif
+
+	/* Call bsp init_secondary hook */
+	bsp_smp_init_secondary();
 }
 
 static void cmp_smp_finish(void)
@@ -133,7 +132,7 @@ static void cmp_cpus_done(void)
  * __KSTK_TOS(idle) is apparently the stack pointer
  * (unsigned long)idle->thread_info the gp
  */
-static void cmp_boot_secondary(int cpu, struct task_struct *idle)
+static void __cpuinit cmp_boot_secondary(int cpu, struct task_struct *idle)
 {
 	struct thread_info *gp = task_thread_info(idle);
 	unsigned long sp = __KSTK_TOS(idle);
@@ -194,7 +193,9 @@ void __init cmp_prepare_cpus(unsigned int max_cpus)
 	 * FIXME: some of these options are per-system, some per-core and
 	 * some per-cpu
 	 */
-	mips_mt_set_cpuoptions();
+	if (cpu_has_mipsmt) {
+		mips_mt_set_cpuoptions();
+	}
 }
 
 struct plat_smp_ops cmp_smp_ops = {

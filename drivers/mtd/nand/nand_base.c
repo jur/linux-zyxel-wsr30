@@ -95,6 +95,15 @@ static int nand_get_device(struct mtd_info *mtd, int new_state);
 static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
 			     struct mtd_oob_ops *ops);
 
+
+#ifdef CONFIG_SPI_NAND_FLASH
+#if CONFIG_MTD_NAND_RTK_PAGE_SIZE != 0x800
+#define RTK_SPINAND_4KB_ROMCODE
+#define RTK_BOOT_SIZE				0x100000
+#define RTK_BOOT_PAGE				(RTK_BOOT_SIZE/CONFIG_MTD_NAND_RTK_PAGE_SIZE)
+#define RTK_2KB_PAGE_SIZE			0x800
+#endif
+#endif
 /*
  * For devices which display every fart in the system on a separate LED. Is
  * compiled away when LED support is disabled.
@@ -1433,6 +1442,10 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 	uint8_t *bufpoi, *oob, *buf;
 	unsigned int max_bitflips = 0;
 
+#ifdef RTK_SPINAND_4KB_ROMCODE
+	uint32_t	chunk_size;
+#endif
+
 	stats = mtd->ecc_stats;
 
 	chipnr = (int)(from >> chip->chip_shift);
@@ -1441,16 +1454,32 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 	realpage = (int)(from >> chip->page_shift);
 	page = realpage & chip->pagemask;
 
+#ifdef RTK_SPINAND_4KB_ROMCODE
+	if(from < RTK_BOOT_SIZE){
+		col = (int)(from & (RTK_2KB_PAGE_SIZE - 1));
+	}else{	
+		col = (int)(from & (mtd->writesize - 1));
+	}
+#else
 	col = (int)(from & (mtd->writesize - 1));
-
+#endif
 	buf = ops->datbuf;
 	oob = ops->oobbuf;
 	oob_required = oob ? 1 : 0;
 
 	while (1) {
+#ifdef RTK_SPINAND_4KB_ROMCODE
+		if(page < RTK_BOOT_PAGE){
+			chunk_size = RTK_2KB_PAGE_SIZE;
+		}else{
+			chunk_size = mtd->writesize;
+		}
+		bytes = min(chunk_size - col, readlen);
+		aligned = (bytes == chunk_size);
+#else		
 		bytes = min(mtd->writesize - col, readlen);
 		aligned = (bytes == mtd->writesize);
-
+#endif
 		/* Is the current page in the buffer? */
 		if (realpage != chip->pagebuf || oob) {
 			bufpoi = aligned ? buf : chip->buffers->databuf;
@@ -1767,6 +1796,11 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 	page = realpage & chip->pagemask;
 
 	while (1) {
+#ifdef RTK_SPINAND_4KB_ROMCODE
+		if(page < RTK_BOOT_PAGE){
+			goto RTK_SKIP_READ;
+		}	
+#endif		
 		if (ops->mode == MTD_OPS_RAW)
 			ret = chip->ecc.read_oob_raw(mtd, chip, page);
 		else
@@ -1786,6 +1820,10 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 				nand_wait_ready(mtd);
 		}
 
+#ifdef RTK_SPINAND_4KB_ROMCODE
+RTK_SKIP_READ:	
+		len = min(len, readlen);
+#endif
 		readlen -= len;
 		if (!readlen)
 			break;
@@ -2234,6 +2272,9 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 	uint8_t *buf = ops->datbuf;
 	int ret;
 	int oob_required = oob ? 1 : 0;
+#ifdef RTK_SPINAND_4KB_ROMCODE
+	uint32_t	chunk_size;
+#endif
 
 	ops->retlen = 0;
 	if (!writelen)
@@ -2245,8 +2286,16 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 			   __func__);
 		return -EINVAL;
 	}
-
+	
+#ifdef RTK_SPINAND_4KB_ROMCODE
+	if(to < RTK_BOOT_SIZE){
+		column = to & (RTK_2KB_PAGE_SIZE - 1);
+	}else{
+		column = to & (mtd->writesize - 1);
+	}
+#else
 	column = to & (mtd->writesize - 1);
+#endif
 
 	chipnr = (int)(to >> chip->chip_shift);
 	chip->select_chip(mtd, chipnr);
@@ -2273,11 +2322,28 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 	}
 
 	while (1) {
+#ifdef RTK_SPINAND_4KB_ROMCODE 
+		chunk_size = mtd->writesize;
+		if(page < RTK_BOOT_PAGE)
+			chunk_size = RTK_2KB_PAGE_SIZE;
+		int bytes = chunk_size;
+#else
 		int bytes = mtd->writesize;
+#endif
 		int cached = writelen > bytes && page != blockmask;
 		uint8_t *wbuf = buf;
 
 		/* Partial page write? */
+#ifdef RTK_SPINAND_4KB_ROMCODE
+		if (unlikely(column || writelen < (chunk_size - 1))) {
+			cached = 0;
+			bytes = min_t(int, bytes - column, (int) writelen);
+			chip->pagebuf = -1;
+			memset(chip->buffers->databuf, 0xff, chunk_size);
+			memcpy(&chip->buffers->databuf[column], buf, bytes);
+			wbuf = chip->buffers->databuf;
+		}
+#else
 		if (unlikely(column || writelen < (mtd->writesize - 1))) {
 			cached = 0;
 			bytes = min_t(int, bytes - column, (int) writelen);
@@ -2286,6 +2352,7 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 			memcpy(&chip->buffers->databuf[column], buf, bytes);
 			wbuf = chip->buffers->databuf;
 		}
+#endif
 
 		if (unlikely(oob)) {
 			size_t len = min(oobwritelen, oobmaxlen);
@@ -2440,6 +2507,11 @@ static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
 	/* Shift to get page */
 	page = (int)(to >> chip->page_shift);
 
+#ifdef RTK_SPINAND_4KB_ROMCODE
+	if(page < RTK_BOOT_PAGE){
+		goto RTK_SKIP_WRITE;	
+	}
+#endif
 	/*
 	 * Reset the chip. Some chips (like the Toshiba TC5832DC found in one
 	 * of my DiskOnChip 2000 test units) will clear the whole data page too
@@ -2469,7 +2541,9 @@ static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
 
 	if (status)
 		return status;
-
+#ifdef RTK_SPINAND_4KB_ROMCODE
+RTK_SKIP_WRITE:
+#endif
 	ops->oobretlen = ops->ooblen;
 
 	return 0;

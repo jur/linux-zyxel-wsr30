@@ -57,7 +57,9 @@
 #include <net/inet_ecn.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
-
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#include <net/rtl/rtl865x_netif.h>
+#endif
 MODULE_AUTHOR("Ville Nuorvala");
 MODULE_DESCRIPTION("IPv6 tunneling device");
 MODULE_LICENSE("GPL");
@@ -292,6 +294,13 @@ out:
  * Return:
  *   created tunnel or NULL
  **/
+ 
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_DSLITE_SUPPORT
+extern int _rtl865x_addIpv6DsLiteEntry(struct in6_addr host_ipv6_addr,u32 host_ipv6_mask,struct in6_addr aftr_ipv6_addr,u32 aftr_ipv6_mask,char * devName,unsigned int mtu);
+extern int32 rtl865x_updatev6SwNetif(char *netifName,int iftype);
+#endif
+#endif
 
 static struct ip6_tnl *ip6_tnl_create(struct net *net, struct __ip6_tnl_parm *p)
 {
@@ -299,7 +308,12 @@ static struct ip6_tnl *ip6_tnl_create(struct net *net, struct __ip6_tnl_parm *p)
 	struct ip6_tnl *t;
 	char name[IFNAMSIZ];
 	int err;
-
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_DSLITE_SUPPORT
+	u32 host_ipv6_mask = 64;
+	u32 aftr_ipv6_mask = 64;
+#endif
+#endif
 	if (p->name[0])
 		strlcpy(name, p->name, IFNAMSIZ);
 	else
@@ -316,6 +330,19 @@ static struct ip6_tnl *ip6_tnl_create(struct net *net, struct __ip6_tnl_parm *p)
 	err = ip6_tnl_create2(dev);
 	if (err < 0)
 		goto failed_free;
+#if 0
+	printk("[%s]:[%d]:dev:%s.%d,,p:%s,%d,%x:%x:%x:%x:%x:%x:%x:%x\n",__FUNCTION__,__LINE__,
+		dev->name,dev->mtu,p->name,p->flags,
+		p->laddr.s6_addr32[0],p->laddr.s6_addr32[1],p->laddr.s6_addr32[2],p->laddr.s6_addr32[3],
+		p->raddr.s6_addr32[0],p->raddr.s6_addr32[1],p->raddr.s6_addr32[2],p->raddr.s6_addr32[3]);
+#endif
+
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_DSLITE_SUPPORT
+	rtl865x_updatev6SwNetif(dev->name,IF_DSLT);
+	_rtl865x_addIpv6DsLiteEntry(p->laddr,host_ipv6_mask,p->raddr,aftr_ipv6_mask,name,dev->mtu);
+#endif
+#endif
 
 	return t;
 
@@ -1032,7 +1059,7 @@ static int ip6_tnl_xmit2(struct sk_buff *skb,
 	ipv6h->hop_limit = t->parms.hop_limit;
 	ipv6h->nexthdr = proto;
 	ipv6h->saddr = fl6->saddr;
-	ipv6h->daddr = fl6->daddr;
+	ipv6h->daddr = fl6->daddr;	
 	ip6tunnel_xmit(skb, dev);
 	if (ndst)
 		ip6_tnl_dst_store(t, ndst);

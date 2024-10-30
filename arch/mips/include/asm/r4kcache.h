@@ -343,19 +343,23 @@ static inline void invalidate_tcache_page(unsigned long addr)
 #define __BUILD_BLAST_CACHE(pfx, desc, indexop, hitop, lsize) \
 static inline void blast_##pfx##cache##lsize(void)			\
 {									\
-	unsigned long start = INDEX_BASE;				\
-	unsigned long end = start + current_cpu_data.desc.waysize;	\
-	unsigned long ws_inc = 1UL << current_cpu_data.desc.waybit;	\
-	unsigned long ws_end = current_cpu_data.desc.ways <<		\
-			       current_cpu_data.desc.waybit;		\
-	unsigned long ws, addr;						\
-									\
-	__##pfx##flush_prologue						\
+	unsigned long start = INDEX_BASE;                                \
+	unsigned long end, ws_inc, ws_end, ws, addr;                    \
+        	                                                        \
+        __##pfx##flush_prologue                                         \
+       preempt_disable();                                              \
+                                                                       \
+       end = start + current_cpu_data.desc.waysize;                    \
+       ws_inc = 1UL << current_cpu_data.desc.waybit;                   \
+       ws_end = current_cpu_data.desc.ways <<                          \
+                current_cpu_data.desc.waybit;                          \
+								       \
 									\
 	for (ws = 0; ws < ws_end; ws += ws_inc)				\
 		for (addr = start; addr < end; addr += lsize * 32)	\
 			cache##lsize##_unroll32(addr|ws, indexop);	\
 									\
+	preempt_enable();                                               \
 	__##pfx##flush_epilogue						\
 }									\
 									\
@@ -376,20 +380,23 @@ static inline void blast_##pfx##cache##lsize##_page(unsigned long page) \
 									\
 static inline void blast_##pfx##cache##lsize##_page_indexed(unsigned long page) \
 {									\
-	unsigned long indexmask = current_cpu_data.desc.waysize - 1;	\
-	unsigned long start = INDEX_BASE + (page & indexmask);		\
-	unsigned long end = start + PAGE_SIZE;				\
-	unsigned long ws_inc = 1UL << current_cpu_data.desc.waybit;	\
-	unsigned long ws_end = current_cpu_data.desc.ways <<		\
-			       current_cpu_data.desc.waybit;		\
-	unsigned long ws, addr;						\
+	unsigned long indexmask, end, start, ws_inc, ws_end, ws, addr;  \
 									\
 	__##pfx##flush_prologue						\
-									\
+	preempt_disable();                                              \
+                                                                        \
+	 indexmask = current_cpu_data.desc.waysize - 1;                  \
+	start = INDEX_BASE + (page & indexmask);                        \
+	end = start + PAGE_SIZE;                                        \
+	ws_inc = 1UL << current_cpu_data.desc.waybit;                   \
+	ws_end = current_cpu_data.desc.ways <<                          \
+		current_cpu_data.desc.waybit;                          \
+								\
 	for (ws = 0; ws < ws_end; ws += ws_inc)				\
 		for (addr = start; addr < end; addr += lsize * 32)	\
 			cache##lsize##_unroll32(addr|ws, indexop);	\
 									\
+	 preempt_enable();                                               \
 	__##pfx##flush_epilogue						\
 }
 

@@ -34,6 +34,50 @@
 #include <linux/netdev_features.h>
 #include <net/flow_keys.h>
 
+#if defined(CONFIG_RTK_VLAN_SUPPORT)
+#include <net/rtl/rtk_vlan.h>
+#endif
+
+#if defined(CONFIG_RTL_819X) || defined(CONFIG_RTL8192CD) || defined(CONFIG_RTL8190) || defined(CONFIG_RTL8192SE)
+#define RTL_PRIV_DATA_SIZE		128
+#endif
+
+#if defined(CONFIG_RTL_QOS_PATCH)  || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN)
+#define	QOS_PATCH_HIGH_QUEUE_PRIO	7
+#define	QOS_PATCH_RX_FROM_LOCAL		0xff
+#define QOS_PATCH_RX_FROM_WIRELESS      7
+#if defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT)
+#define RX_FROM_LOCAL	QOS_PATCH_RX_FROM_LOCAL
+#define RX_FROM_WIRELESS QOS_PATCH_RX_FROM_WIRELESS
+#endif
+#endif
+#ifndef CONFIG_RTL_CUSTOM_PASSTHRU
+#define CONFIG_RTL_CUSTOM_PASSTHRU
+#endif
+#if defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG) && defined(CONFIG_RTL_CUSTOM_PASSTHRU)
+#define IS_IP6_MC_PASSTHRU 0x01
+#define FLOOD_IN_BRIDGE    0x02
+#endif
+
+
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
+#define PORT_DECISION_PRIORITY_BITMAP	1<<0
+#define VLAN_DECISION_PRIORITY_BITMAP	1<<1
+#define DSCP_DECISION_PRIORITY_BITMAP	1<<2
+#define ACL_DECISION_PRIORITY_BITMAP		1<<3
+#define NAT_DECISION_PRIORITY_BITMAP	1<<4
+
+enum decision_priority
+{
+	port_decision_priority,
+	vlan_decision_priority,
+	dscp_decision_priority,
+	acl_decision_priority,
+	nat_decision_priority,
+	max_decision_priority,
+};
+#endif
+
 /* Don't change this without changing skb_csum_unnecessary! */
 #define CHECKSUM_NONE 0
 #define CHECKSUM_UNNECESSARY 1
@@ -415,6 +459,9 @@ struct sk_buff {
 	 */
 	char			cb[48] __aligned(8);
 
+	/*This field is only needed by RtL8190 Driver.FIX ME!!!*/
+        unsigned char   __unused;
+	
 	unsigned long		_skb_refdst;
 #ifdef CONFIG_XFRM
 	struct	sec_path	*sp;
@@ -494,6 +541,78 @@ struct sk_buff {
 #ifdef CONFIG_NETWORK_SECMARK
 	__u32			secmark;
 #endif
+
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	struct net_device	*from_dev;
+	__u32			vlan_member;
+#endif
+
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	char				*switch_port;	
+#endif
+#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
+	__u8			passThruFlag;
+#endif
+
+#if defined( CONFIG_RTL_HARDWARE_MULTICAST) || defined(CONFIG_RTL865X_LANPORT_RESTRICTION) ||defined(CONFIG_RTL_QOS_VLANID_SUPPORT)||defined (CONFIG_RTL_VLAN_8021Q)
+	__u16			srcPort;
+	__u16			srcVlanId:12;
+#endif
+
+#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
+	__u16			srcVlanPriority:3;
+#endif
+
+/* #if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT)|| defined(CONFIG_RTL_FAST_FILTER) */
+	__u8			srcPhyPort;		// 0~4
+	__u8			dstPhyPort;		// 0~4
+/* #endif */
+
+#if defined(CONFIG_RTK_VLAN_SUPPORT)
+	struct vlan_tag tag;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+	struct vlan_info *src_info;
+#endif
+#endif
+
+#if defined(CONFIG_RTL_VLAN_8021Q)
+	__u8 linux_vlan_src_tag[4];
+#endif
+#if defined(CONFIG_RTL_FAST_BRIDGE)
+	__u8 fast_br_forwarding_flags;
+#endif
+
+#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)			
+	__u8 original_dscp;
+ #endif
+
+ #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
+ 	__u16 original_vlanpri;
+ #endif
+
+#if defined(CONFIG_RTL_DNS_TRAP) || defined(CONFIG_RTL_HTTP_REDIRECT)
+	__u8   dns_trap:1;
+	__u8   is_dns_pkt:1;
+	__u8   http_redirect:1;
+	__u8   others_reserved:5;
+#endif
+
+ #if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
+	__u8 	decision_bitmap;
+ 	__u32 	mark_ext[max_decision_priority];
+#endif
+ 
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+/* #if defined(IMPROVE_QOS) && defined(CONFIG_NET_SCHED) */
+	/* This member is only used at fastpath when both IMPROVE_QOS and CONFIG_NET_SCHED are defined. */
+	struct net_device	*inDev;
+/* end of IMPROVE_QOS and CONFIG_NET_SCHED */
+#endif
+
+#if defined (CONFIG_RTL_FAST_PPPOE)
+	__u32 pppoe_flag;
+	struct net_device	*rx_dev;
+#endif
 	union {
 		__u32		mark;
 		__u32		dropcount;
@@ -521,6 +640,9 @@ struct sk_buff {
  */
 #include <linux/slab.h>
 
+#if defined(CONFIG_RTL_819X)
+extern void dev_kfree_skb_any(struct sk_buff *skb);
+#endif
 
 #define SKB_ALLOC_FCLONE	0x01
 #define SKB_ALLOC_RX		0x02
@@ -554,6 +676,14 @@ static inline struct dst_entry *skb_dst(const struct sk_buff *skb)
 		!rcu_read_lock_bh_held());
 	return (struct dst_entry *)(skb->_skb_refdst & SKB_DST_PTRMASK);
 }
+
+#if defined(CONFIG_RTL_819X)
+static inline struct dst_entry *rtl_skb_dst(const struct sk_buff *skb)
+{
+	return (struct dst_entry *)(skb->_skb_refdst);
+}
+#endif
+
 
 /**
  * skb_dst_set - sets skb dst
@@ -1087,6 +1217,12 @@ static inline void __skb_insert(struct sk_buff *newsk,
 	newsk->prev = prev;
 	next->prev  = prev->next = newsk;
 	list->qlen++;
+
+#if defined(CONFIG_RTL_TRIBAND_SUPPORT) && defined(CONFIG_RTL_8198C)
+	_dma_cache_wback_inv((unsigned long)newsk, sizeof(struct sk_buff));
+	_dma_cache_wback_inv((unsigned long)next, sizeof(struct sk_buff));
+	_dma_cache_wback_inv((unsigned long)prev, sizeof(struct sk_buff));
+#endif //CONFIG_RTL_TRIBAND_SUPPORT
 }
 
 static inline void __skb_queue_splice(const struct sk_buff_head *list,
@@ -1852,6 +1988,14 @@ static inline int pskb_network_may_pull(struct sk_buff *skb, unsigned int len)
 #define NET_SKB_PAD	max(32, L1_CACHE_BYTES)
 #endif
 
+#if defined(CONFIG_RTL_ETH_PRIV_SKB)
+#ifndef RTL_MAX
+#define RTL_MAX(a,b)  (((a) > (b)) ? (a) : (b))
+#endif	
+
+#define RTL_NET_SKB_PAD	RTL_MAX(32, L1_CACHE_BYTES)
+#endif
+
 extern int ___pskb_trim(struct sk_buff *skb, unsigned int len);
 
 static inline void __skb_trim(struct sk_buff *skb, unsigned int len)
@@ -1939,7 +2083,13 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
 {
 	struct sk_buff *skb;
 	while ((skb = __skb_dequeue(list)) != NULL)
+	{
+		#ifdef CONFIG_RTL_819X
+		dev_kfree_skb_any(skb);
+		#else
 		kfree_skb(skb);
+		#endif
+	}
 }
 
 #define NETDEV_FRAG_PAGE_MAX_ORDER get_order(32768)
@@ -2447,6 +2597,12 @@ extern unsigned int    datagram_poll(struct file *file, struct socket *sock,
 extern int	       skb_copy_datagram_iovec(const struct sk_buff *from,
 					       int offset, struct iovec *to,
 					       int size);
+#ifdef CONFIG_RTL_SENDFILE_PATCH
+//Patch by G2NAS:enhance performance from socket to file
+extern int             skb_copy_datagram_to_kernel_iovec(const struct sk_buff *from,
+                                               int offset, struct iovec *to,
+                                               int size);
+#endif /* CONFIG_RTL_SENDFILE_PATCH */
 extern int	       skb_copy_and_csum_datagram_iovec(struct sk_buff *skb,
 							int hlen,
 							struct iovec *iov);

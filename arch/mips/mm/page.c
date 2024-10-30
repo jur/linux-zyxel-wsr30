@@ -69,9 +69,6 @@ UASM_L_LA(_copy_pref_store)
 static struct uasm_label __cpuinitdata labels[5];
 static struct uasm_reloc __cpuinitdata relocs[5];
 
-#define cpu_is_r4600_v1_x()	((read_c0_prid() & 0xfffffff0) == 0x00002010)
-#define cpu_is_r4600_v2_x()	((read_c0_prid() & 0xfffffff0) == 0x00002020)
-
 static int pref_bias_clear_store __cpuinitdata;
 static int pref_bias_copy_load __cpuinitdata;
 static int pref_bias_copy_store __cpuinitdata;
@@ -91,21 +88,12 @@ static int cache_line_size __cpuinitdata;
 static inline void __cpuinit
 pg_addiu(u32 **buf, unsigned int reg1, unsigned int reg2, unsigned int off)
 {
-	if (cpu_has_64bit_gp_regs && DADDI_WAR && r4k_daddiu_bug()) {
-		if (off > 0x7fff) {
-			uasm_i_lui(buf, T9, uasm_rel_hi(off));
-			uasm_i_addiu(buf, T9, T9, uasm_rel_lo(off));
-		} else
-			uasm_i_addiu(buf, T9, ZERO, off);
-		uasm_i_daddu(buf, reg1, reg2, T9);
-	} else {
-		if (off > 0x7fff) {
-			uasm_i_lui(buf, T9, uasm_rel_hi(off));
-			uasm_i_addiu(buf, T9, T9, uasm_rel_lo(off));
-			UASM_i_ADDU(buf, reg1, reg2, T9);
-		} else
-			UASM_i_ADDIU(buf, reg1, reg2, off);
-	}
+	if (off > 0x7fff) {
+		uasm_i_lui(buf, T9, uasm_rel_hi(off));
+		uasm_i_addiu(buf, T9, T9, uasm_rel_lo(off));
+		UASM_i_ADDU(buf, reg1, reg2, T9);
+	} else
+		UASM_i_ADDIU(buf, reg1, reg2, off);
 }
 
 static void __cpuinit set_prefetch_parameters(void)
@@ -133,54 +121,13 @@ static void __cpuinit set_prefetch_parameters(void)
 		 * guesswork.
 		 */
 		cache_line_size = cpu_dcache_line_size();
-		switch (current_cpu_type()) {
-		case CPU_R5500:
-		case CPU_TX49XX:
-			/* These processors only support the Pref_Load. */
-			pref_bias_copy_load = 256;
-			break;
-
-		case CPU_R10000:
-		case CPU_R12000:
-		case CPU_R14000:
-			/*
-			 * Those values have been experimentally tuned for an
-			 * Origin 200.
-			 */
-			pref_bias_clear_store = 512;
-			pref_bias_copy_load = 256;
-			pref_bias_copy_store = 256;
-			pref_src_mode = Pref_LoadStreamed;
-			pref_dst_mode = Pref_StoreStreamed;
-			break;
-
-		case CPU_SB1:
-		case CPU_SB1A:
-			pref_bias_clear_store = 128;
-			pref_bias_copy_load = 128;
-			pref_bias_copy_store = 128;
-			/*
-			 * SB1 pass1 Pref_LoadStreamed/Pref_StoreStreamed
-			 * hints are broken.
-			 */
-			if (current_cpu_type() == CPU_SB1 &&
-			    (current_cpu_data.processor_id & 0xff) < 0x02) {
-				pref_src_mode = Pref_Load;
-				pref_dst_mode = Pref_Store;
-			} else {
-				pref_src_mode = Pref_LoadStreamed;
-				pref_dst_mode = Pref_StoreStreamed;
-			}
-			break;
-
-		default:
-			pref_bias_clear_store = 128;
-			pref_bias_copy_load = 256;
-			pref_bias_copy_store = 128;
-			pref_src_mode = Pref_LoadStreamed;
+		pref_bias_clear_store = 128;
+		pref_bias_copy_load = 256;
+		pref_bias_copy_store = 128;
+		pref_src_mode = Pref_LoadStreamed;
+	//	pref_dst_mode = Pref_PrepareForStore;
+		if (current_cpu_type() != CPU_1074K)
 			pref_dst_mode = Pref_PrepareForStore;
-			break;
-		}
 	} else {
 		if (cpu_has_cache_cdex_s)
 			cache_line_size = cpu_scache_line_size();
@@ -220,19 +167,9 @@ static inline void __cpuinit build_clear_pref(u32 **buf, int off)
 		if (cpu_has_cache_cdex_s) {
 			uasm_i_cache(buf, Create_Dirty_Excl_SD, off, A0);
 		} else if (cpu_has_cache_cdex_p) {
-			if (R4600_V1_HIT_CACHEOP_WAR && cpu_is_r4600_v1_x()) {
-				uasm_i_nop(buf);
-				uasm_i_nop(buf);
-				uasm_i_nop(buf);
-				uasm_i_nop(buf);
-			}
-
-			if (R4600_V2_HIT_CACHEOP_WAR && cpu_is_r4600_v2_x())
-				uasm_i_lw(buf, ZERO, ZERO, AT);
-
 			uasm_i_cache(buf, Create_Dirty_Excl_D, off, A0);
 		}
-		}
+	}
 }
 
 extern u32 __clear_page_start;
@@ -271,9 +208,6 @@ void __cpuinit build_clear_page(void)
 		pg_addiu(&buf, A2, A0, off);
 	else
 		uasm_i_ori(&buf, A2, A0, off);
-
-	if (R4600_V2_HIT_CACHEOP_WAR && cpu_is_r4600_v2_x())
-		uasm_i_lui(&buf, AT, 0xa000);
 
 	off = cache_line_size ? min(8, pref_bias_clear_store / cache_line_size)
 				* cache_line_size : 0;
@@ -372,16 +306,6 @@ static inline void build_copy_store_pref(u32 **buf, int off)
 		if (cpu_has_cache_cdex_s) {
 			uasm_i_cache(buf, Create_Dirty_Excl_SD, off, A0);
 		} else if (cpu_has_cache_cdex_p) {
-			if (R4600_V1_HIT_CACHEOP_WAR && cpu_is_r4600_v1_x()) {
-				uasm_i_nop(buf);
-				uasm_i_nop(buf);
-				uasm_i_nop(buf);
-				uasm_i_nop(buf);
-			}
-
-			if (R4600_V2_HIT_CACHEOP_WAR && cpu_is_r4600_v2_x())
-				uasm_i_lw(buf, ZERO, ZERO, AT);
-
 			uasm_i_cache(buf, Create_Dirty_Excl_D, off, A0);
 		}
 	}
@@ -422,9 +346,6 @@ void __cpuinit build_copy_page(void)
 		pg_addiu(&buf, A2, A0, off);
 	else
 		uasm_i_ori(&buf, A2, A0, off);
-
-	if (R4600_V2_HIT_CACHEOP_WAR && cpu_is_r4600_v2_x())
-		uasm_i_lui(&buf, AT, 0xa000);
 
 	off = cache_line_size ? min(8, pref_bias_copy_load / cache_line_size) *
 				cache_line_size : 0;

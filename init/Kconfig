@@ -182,7 +182,7 @@ config DEFAULT_HOSTNAME
 config SWAP
 	bool "Support for paging of anonymous memory (swap)"
 	depends on MMU && BLOCK
-	default y
+	default n
 	help
 	  This option allows you to choose whether you want to have support
 	  for so called swap devices or swap files in your kernel that are
@@ -247,6 +247,7 @@ config FHANDLE
 config AUDIT
 	bool "Auditing support"
 	depends on NET
+	default n
 	help
 	  Enable auditing infrastructure that can be used with another
 	  kernel subsystem, such as SELinux (which requires this for
@@ -355,6 +356,7 @@ endchoice
 
 config BSD_PROCESS_ACCT
 	bool "BSD Process Accounting"
+	default n
 	help
 	  If you say Y here, a user level program will be able to instruct the
 	  kernel (via a special system call) to write process accounting
@@ -756,6 +758,9 @@ config LOG_BUF_SHIFT
 # Architectures with an unreliable sched_clock() should select this:
 #
 config HAVE_UNSTABLE_SCHED_CLOCK
+	bool
+
+config GENERIC_SCHED_CLOCK
 	bool
 
 #
@@ -1219,6 +1224,26 @@ config CC_OPTIMIZE_FOR_SIZE
 config SYSCTL
 	bool
 
+config SYSCTL_EXCEPTION_TRACE
+	bool
+	help
+	  Enable support for /proc/sys/debug/exception-trace.
+
+config SYSCTL_ARCH_UNALIGN_NO_WARN
+	bool
+	help
+	  Enable support for /proc/sys/kernel/ignore-unaligned-usertrap
+	  Allows arch to define/use @no_unaligned_warning to possibly warn
+	  about unaligned access emulation going on under the hood.
+
+config SYSCTL_ARCH_UNALIGN_ALLOW
+	bool
+	help
+	  Enable support for /proc/sys/kernel/unaligned-trap
+	  Allows arches to define/use @unaligned_enabled to runtime toggle
+	  the unaligned access emulation.
+	  see arch/parisc/kernel/unaligned.c for reference
+
 config ANON_INODES
 	bool
 
@@ -1310,6 +1335,11 @@ config KALLSYMS_ALL
 
 	   Say N unless you really need all symbols.
 
+config PRINTK_FUNC
+        default y
+        bool "Enable support for printk log" if EXPERT
+        
+
 config PRINTK
 	default y
 	bool "Enable support for printk" if EXPERT
@@ -1333,7 +1363,7 @@ config BUG
 
 config ELF_CORE
 	depends on COREDUMP
-	default y
+	default n
 	bool "Enable ELF core dumps" if EXPERT
 	help
 	  Enable support for generating core dumps. Disabling saves about 4k.
@@ -1343,13 +1373,13 @@ config PCSPKR_PLATFORM
 	bool "Enable PC-Speaker support" if EXPERT
 	depends on HAVE_PCSPKR_PLATFORM
 	select I8253_LOCK
-	default y
+	default n
 	help
           This option allows to disable the internal PC-Speaker
           support, saving some memory.
 
 config BASE_FULL
-	default y
+	default n
 	bool "Enable full-sized data structures for core" if EXPERT
 	help
 	  Disabling this option reduces the size of miscellaneous core
@@ -1413,7 +1443,7 @@ config EVENTFD
 
 config SHMEM
 	bool "Use full shmem filesystem" if EXPERT
-	default y
+	default n
 	depends on MMU
 	help
 	  The shmem is an internal filesystem used to manage shared memory.
@@ -1431,7 +1461,7 @@ config AIO
 	  this option saves about 7k.
 
 config PCI_QUIRKS
-	default y
+	default n
 	bool "Enable PCI quirk workarounds" if EXPERT
 	depends on PCI
 	help
@@ -1456,6 +1486,15 @@ config PERF_USE_VMALLOC
 	bool
 	help
 	  See tools/perf/design.txt for details
+
+config HAVE_UID16
+	bool
+
+config HAVE_PCSPKR_PLATFORM
+	bool
+
+config HOTPLUG
+	def_bool y
 
 menu "Kernel Performance Events And Counters"
 
@@ -1513,7 +1552,7 @@ config VM_EVENT_COUNTERS
 	  if VM event counters are disabled.
 
 config SLUB_DEBUG
-	default y
+	default n
 	bool "Enable SLUB debugging support" if EXPERT
 	depends on SLUB && SYSFS
 	help

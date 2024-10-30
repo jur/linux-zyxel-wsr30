@@ -16,6 +16,13 @@
 #include <linux/netdevice.h>
 #include <uapi/linux/if_bridge.h>
 
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+#define BRCTL_SET_IGMPPROXY_PID 200
+#if defined (CONFIG_RT_MULTIPLE_BR_SUPPORT)
+#define BRCTL_REGISTER_IGMPSNOOPING_MODULE 201
+#endif
+#endif
+
 extern void brioctl_set(int (*ioctl_hook)(struct net *, unsigned int, void __user *));
 
 typedef int br_should_route_hook_t(struct sk_buff *skb);

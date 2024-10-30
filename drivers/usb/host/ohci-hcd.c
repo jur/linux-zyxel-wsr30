@@ -76,17 +76,19 @@ static const char	hcd_name [] = "ohci_hcd";
 #define	STATECHANGE_DELAY	msecs_to_jiffies(300)
 
 #include "ohci.h"
+#ifdef CONFIG_USB_OHCI_PCI
 #include "pci-quirks.h"
+#endif
 
 static void ohci_dump (struct ohci_hcd *ohci, int verbose);
 static int ohci_init (struct ohci_hcd *ohci);
 static void ohci_stop (struct usb_hcd *hcd);
 
-#if defined(CONFIG_PM) || defined(CONFIG_PCI)
+#if defined(CONFIG_PM) || defined(CONFIG_USB_OHCI_PCI)
 static int ohci_restart (struct ohci_hcd *ohci);
 #endif
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_OHCI_PCI
 static void sb800_prefetch(struct ohci_hcd *ohci, int on);
 #else
 static inline void sb800_prefetch(struct ohci_hcd *ohci, int on)
@@ -926,18 +928,22 @@ static void ohci_stop (struct usb_hcd *hcd)
 
 	ohci_dump (ohci, 1);
 
+#ifdef CONFIG_USB_OHCI_PCI
 	if (quirk_nec(ohci))
 		flush_work(&ohci->nec_work);
+#endif
 
 	ohci_usb_reset (ohci);
 	ohci_writel (ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
 	free_irq(hcd->irq, hcd);
 	hcd->irq = 0;
 
+#ifdef CONFIG_USB_OHCI_PCI
 	if (quirk_zfmicro(ohci))
 		del_timer(&ohci->unlink_watchdog);
 	if (quirk_amdiso(ohci))
 		usb_amd_dev_put();
+#endif
 
 	remove_debug_files (ohci);
 	ohci_mem_cleanup (ohci);
@@ -952,7 +958,7 @@ static void ohci_stop (struct usb_hcd *hcd)
 
 /*-------------------------------------------------------------------------*/
 
-#if defined(CONFIG_PM) || defined(CONFIG_PCI)
+#if defined(CONFIG_PM) || defined(CONFIG_USB_OHCI_PCI)
 
 /* must not be called from interrupt context */
 static int ohci_restart (struct ohci_hcd *ohci)
@@ -1096,7 +1102,7 @@ MODULE_AUTHOR (DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE ("GPL");
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_OHCI_PCI
 #include "ohci-pci.c"
 #define PCI_DRIVER		ohci_pci_driver
 #endif
@@ -1194,6 +1200,11 @@ MODULE_LICENSE ("GPL");
 #ifdef CONFIG_USB_OHCI_HCD_PLATFORM
 #include "ohci-platform.c"
 #define PLATFORM_DRIVER		ohci_platform_driver
+#endif
+
+#ifdef CONFIG_RTL_819X
+#include "ohci-rtl819x.c"
+#define PLATFORM_DRIVER     ohci_hcd_rtl819x_driver
 #endif
 
 #if	!defined(PCI_DRIVER) &&		\

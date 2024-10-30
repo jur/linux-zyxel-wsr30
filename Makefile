@@ -196,9 +196,10 @@ ARCH		?= $(SUBARCH)
 CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
 
 # Architecture as present in compile.h
-UTS_MACHINE 	:= $(ARCH)
-SRCARCH 	:= $(ARCH)
+UTS_MACHINE	:= $(ARCH)
+SRCARCH		:= $(ARCH)
 
+export KBUILD_BUILDHOST := $(SUBARCH)
 # Additional ARCH settings for x86
 ifeq ($(ARCH),i386)
         SRCARCH := x86
@@ -381,7 +382,7 @@ KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_AFLAGS_MODULE  := -DMODULE
 KBUILD_CFLAGS_MODULE  := -DMODULE
-KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
+KBUILD_LDFLAGS_MODULE = -T $(srctree)/scripts/module-common.lds $(if $(CONFIG_PROFILING),,-s)
 
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
 KERNELRELEASE = $(shell cat include/config/kernel.release 2> /dev/null)
@@ -525,6 +526,8 @@ drivers-y	:= drivers/ sound/ firmware/
 net-y		:= net/
 libs-y		:= lib/
 core-y		:= usr/
+
+include .config
 endif # KBUILD_EXTMOD
 
 ifeq ($(dot-config),1)
@@ -573,10 +576,12 @@ endif # $(dot-config)
 all: vmlinux
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
+#KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
 else
-KBUILD_CFLAGS	+= -O2
+#KBUILD_CFLAGS	+= -O2
 endif
+KBUILD_CFLAGS	+= -O1
 
 include $(srctree)/arch/$(SRCARCH)/Makefile
 
@@ -759,7 +764,7 @@ libs-y		:= $(libs-y1) $(libs-y2)
 # Externally visible symbols (used by link-vmlinux.sh)
 export KBUILD_VMLINUX_INIT := $(head-y) $(init-y)
 export KBUILD_VMLINUX_MAIN := $(core-y) $(libs-y) $(drivers-y) $(net-y)
-export KBUILD_LDS          := arch/$(SRCARCH)/kernel/vmlinux.lds
+export KBUILD_LDS          := arch/$(SRCARCH)/bsp/vmlinux.lds
 export LDFLAGS_vmlinux
 # used by scripts/pacmage/Makefile
 export KBUILD_ALLDIRS := $(sort $(filter-out arch/%,$(vmlinux-alldirs)) arch Documentation include samples scripts tools virt)
@@ -801,7 +806,7 @@ $(vmlinux-dirs): prepare scripts
 # Store (new) KERNELRELASE string in include/config/kernel.release
 include/config/kernel.release: include/config/auto.conf FORCE
 	$(Q)rm -f $@
-	$(Q)echo "$(KERNELVERSION)$$($(CONFIG_SHELL) $(srctree)/scripts/setlocalversion $(srctree))" > $@
+	$(Q)echo "$(KERNELVERSION)" > $@
 
 
 # Things we need to do before we recursively start building the kernel
@@ -825,7 +830,26 @@ ifneq ($(KBUILD_SRC),)
 		/bin/false; \
 	fi;
 endif
-
+ifeq ($(CONFIG_RTL_SIMPLE_CONFIG), y)
+	echo "the toolchain is $(CONFIG_RSDKDIR)"
+	rm -f .toolchain_*;
+	egrep "^CONFIG_RSDKDIR=toolchain/rsdk-4.6.4-4181-EB-3.10-u0.9.33-m32-150324" ../.config > .toolchain_4.6.4-4181;\
+	if [ -s .toolchain_4.6.4-4181 ];  then \
+		cp ./drivers/net/wireless/rtl8192cd_sc/4.6.4-4181 ./drivers/net/wireless/rtl8192cd/8192cd_profile.S; \
+	fi;
+	egrep "^CONFIG_RSDKDIR=toolchain/msdk-4.4.7-mips-EB-3.10-0.9.33-m32t-131227b" ../.config > .toolchain_4.4.7-mips-EB;\
+	if [ -s .toolchain_4.4.7-mips-EB ]; then \
+		cp ./drivers/net/wireless/rtl8192cd_sc/4.4.7-mips-EB ./drivers/net/wireless/rtl8192cd/8192cd_profile.S; \
+	fi;
+	egrep "^CONFIG_RSDKDIR=toolchain/msdk-4.4.7-mips-EL-3.10-u0.9.33-m32t-140827" ../.config > .toolchain_4.4.7-mips-EL;\
+	if [ -s .toolchain_4.4.7-mips-EL ];  then \
+		cp ./drivers/net/wireless/rtl8192cd_sc/4.4.7-mips-EL ./drivers/net/wireless/rtl8192cd/8192cd_profile.S; \
+	fi;
+	egrep "^CONFIG_RSDKDIR=toolchain/rsdk-4.6.4-5281-EB-3.10-0.9.33-m32ub-20141111" ../.config > .toolchain_4.6.4-5281;\
+	if [ -s .toolchain_4.6.4-5281 ];  then \
+		cp ./drivers/net/wireless/rtl8192cd_sc/4.6.4-5281 ./drivers/net/wireless/rtl8192cd/8192cd_profile.S; \
+	fi;
+endif
 # prepare2 creates a makefile if using a separate output directory
 prepare2: prepare3 outputmakefile asm-generic
 
@@ -1001,12 +1025,6 @@ else # CONFIG_MODULES
 # ---------------------------------------------------------------------------
 
 modules modules_install: FORCE
-	@echo >&2
-	@echo >&2 "The present kernel configuration has modules disabled."
-	@echo >&2 "Type 'make config' and enable loadable module support."
-	@echo >&2 "Then build a kernel with module support enabled."
-	@echo >&2
-	@exit 1
 
 endif # CONFIG_MODULES
 

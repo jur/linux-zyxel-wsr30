@@ -29,6 +29,23 @@
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <linux/netfilter/nf_nat.h>
 
+#if defined(CONFIG_RTL_819X)
+#include <linux/inetdevice.h>
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl865x_netif.h>
+#include <net/rtl/rtl_nic.h>
+#include <net/rtl/features/rtl_ps_hooks.h>
+#include <net/rtl/features/rtl_ps_log.h>
+#endif
+
+#if defined (CONFIG_RTL_LAYERED_DRIVER) && defined (CONFIG_RTL_LAYERED_DRIVER_L4) && defined (CONFIG_RTL_HARDWARE_NAT)
+#include <net/rtl/rtl865x_nat.h>
+#endif
+
+#if defined (CONFIG_RTL_HARDWARE_NAT) && defined (CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)
+extern __DRAM_GEN int gHwNatEnabled;
+#endif
+
 static DEFINE_SPINLOCK(nf_nat_lock);
 
 static DEFINE_MUTEX(nf_nat_proto_mutex);
@@ -339,6 +356,45 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 
 	/* Only bother mapping if it's not already in range and unique */
 	if (!(range->flags & NF_NAT_RANGE_PROTO_RANDOM)) {
+#if defined (CONFIG_RTL_HARDWARE_NAT)	&& defined (CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)	
+	/* Only bother mapping if it's not already in range and unique */
+	if ((!(range->flags & NF_NAT_RANGE_PROTO_SPECIFIED) ||
+	     l4proto->in_range(tuple, maniptype, &range->min_proto, &range->max_proto)) &&
+	    !nf_nat_used_tuple(tuple, ct)) {
+		if(	(gHwNatEnabled) && (maniptype==NF_NAT_MANIP_SRC) &&
+			((orig_tuple->dst.protonum==IPPROTO_TCP) ||(orig_tuple->dst.protonum==IPPROTO_UDP)))
+		{
+			unsigned int asicNaptHashScore=0;
+			rtl865x_napt_entry rtl865xNaptEntry;
+			
+			rtl865xNaptEntry.protocol = (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.protonum==IPPROTO_TCP)? 1: 0;
+		
+			rtl865xNaptEntry.intIp = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip;
+			rtl865xNaptEntry.remIp = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip;
+			rtl865xNaptEntry.extIp = tuple->src.u3.ip;
+			rtl865xNaptEntry.intPort = rtl865xNaptEntry.protocol?ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.tcp.port:ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.udp.port;
+			rtl865xNaptEntry.remPort = rtl865xNaptEntry.protocol?ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port:ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port;
+			rtl865xNaptEntry.extPort = rtl865xNaptEntry.protocol?tuple->src.u.tcp.port:tuple->src.u.udp.port;
+			
+			rtl865x_getAsicNaptHashScore(&rtl865xNaptEntry, &asicNaptHashScore);
+			/*
+			printk("%s:%d:maniptype is %d,%s (%u.%u.%u.%u:%u ->  %u.%u.%u.%u:%u ->%u.%u.%u.%u:%u),asicNaptHashScore is %d\n\n\n",
+				__FUNCTION__,__LINE__,maniptype, proto?"tcp":"udp", 
+				NIPQUAD(sip), sp, NIPQUAD(gip), gp, NIPQUAD(dip), dp,asicNaptHashScore);	
+			*/
+			if(asicNaptHashScore==100)
+			{
+				rtl865x_preReserveConn(&rtl865xNaptEntry);
+				goto out;
+			}
+		
+		}
+		else
+		{
+			goto out;
+		}
+	}
+#else
 		if (range->flags & NF_NAT_RANGE_PROTO_SPECIFIED) {
 			if (l4proto->in_range(tuple, maniptype,
 					      &range->min_proto,
@@ -349,6 +405,7 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 		} else if (!nf_nat_used_tuple(tuple, ct)) {
 			goto out;
 		}
+#endif
 	}
 
 	/* Last change: get protocol to try to obtain unique tuple. */
@@ -365,6 +422,13 @@ nf_nat_setup_info(struct nf_conn *ct,
 	struct net *net = nf_ct_net(ct);
 	struct nf_conntrack_tuple curr_tuple, new_tuple;
 	struct nf_conn_nat *nat;
+	#if defined(CONFIG_RTL_BATTLENET_ALG)
+	extern unsigned int _br0_ip;
+	extern unsigned int _br0_mask;
+	struct nf_conn *ct_temp = NULL;
+	int flag_ori;
+	#endif
+
 
 	/* nat helper or nfctnetlink also setup binding */
 	nat = nfct_nat(ct);
@@ -397,6 +461,27 @@ nf_nat_setup_info(struct nf_conn *ct,
 		nf_ct_invert_tuplepr(&reply, &new_tuple);
 		nf_conntrack_alter_reply(ct, &reply);
 
+		#if defined(CONFIG_RTL_BATTLENET_ALG)
+		if((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.protonum == IPPROTO_UDP) &&
+		    (ntohs(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.all) == BATTLENET_PORT) &&
+		    ((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip & _br0_mask) == (_br0_ip & _br0_mask)) &&
+		    ((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip & _br0_mask) != (_br0_ip & _br0_mask)))
+		{
+			spin_lock_bh(&nf_conntrack_lock);
+
+			ct_temp = rtl_find_ct_by_tuple_src(&(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple), &flag_ori);
+
+			if((flag_ori == 1) && (ct_temp != NULL))
+			{
+				if((ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.all) != (ct_temp->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.all))
+					ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.all  = ct_temp->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.all;
+			}
+
+			spin_unlock_bh(&nf_conntrack_lock);
+		}
+		#endif
+
+
 		/* Non-atomic: we own this at the moment. */
 		if (maniptype == NF_NAT_MANIP_SRC)
 			ct->status |= IPS_SRC_NAT;
@@ -428,6 +513,41 @@ nf_nat_setup_info(struct nf_conn *ct,
 }
 EXPORT_SYMBOL(nf_nat_setup_info);
 
+#if defined(CONFIG_RTL_BATTLENET_ALG)
+static void rtl_set_nat_status(struct nf_conn *ct, struct sk_buff *skb, enum nf_nat_manip_type mtype)
+{
+	extern unsigned int _br0_ip;
+	extern unsigned int _br0_mask;
+
+	if((ip_hdr(skb)->protocol == IPPROTO_UDP) &&
+	  (ntohs(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.all) == BATTLENET_PORT) &&
+	  ((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip & _br0_mask) == (_br0_ip & _br0_mask)) &&
+	  (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip == wan_ip)&&
+	  (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip != ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip) &&
+	  (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip != ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))
+	  {
+		if (mtype == NF_NAT_MANIP_SRC)
+			ct->status |= IPS_SRC_NAT;
+		else
+			ct->status |= IPS_DST_NAT;
+
+		/* It's done. */
+		if (mtype == NF_NAT_MANIP_DST)
+			set_bit(IPS_DST_NAT_DONE_BIT, &ct->status);
+		else
+			set_bit(IPS_SRC_NAT_DONE_BIT, &ct->status);
+	  }
+}
+#endif
+#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+extern int fast_nat_fw;
+#endif
+#if defined(CONFIG_RTL_HARDWARE_NAT)
+extern int gHwNatEnabled;
+#endif
+#endif
+
 /* Do packet manipulations according to nf_nat_setup_info. */
 unsigned int nf_nat_packet(struct nf_conn *ct,
 			   enum ip_conntrack_info ctinfo,
@@ -439,6 +559,13 @@ unsigned int nf_nat_packet(struct nf_conn *ct,
 	enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
 	unsigned long statusbit;
 	enum nf_nat_manip_type mtype = HOOK2MANIP(hooknum);
+#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_inso_s	conn_info;
+#endif
+
+#if defined(CONFIG_RTL_BATTLENET_ALG)
+	rtl_set_nat_status(ct, skb, mtype);
+#endif
 
 	if (mtype == NF_NAT_MANIP_SRC)
 		statusbit = IPS_SRC_NAT;
@@ -461,6 +588,29 @@ unsigned int nf_nat_packet(struct nf_conn *ct,
 						target.dst.protonum);
 		if (!l3proto->manip_pkt(skb, 0, l4proto, &target, mtype))
 			return NF_DROP;
+
+		#if defined(CONFIG_RTL_819X)
+		#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
+		if (
+			#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+			fast_nat_fw
+			#else
+			0 //mark_hap
+			#endif
+			#if defined(CONFIG_RTL_HARDWARE_NAT)
+			||gHwNatEnabled
+			#endif
+			)
+		#endif
+		{
+			conn_info.ct = ct;
+			conn_info.skb = skb;
+			conn_info.hooknum = hooknum;
+			conn_info.ctinfo = ctinfo;
+			rtl_nf_nat_packet_hooks(&conn_info);
+		}
+		#endif
+
 	}
 	return NF_ACCEPT;
 }
@@ -832,6 +982,11 @@ static int __init nf_nat_init(void)
 	BUG_ON(nf_nat_decode_session_hook != NULL);
 	RCU_INIT_POINTER(nf_nat_decode_session_hook, __nf_nat_decode_session);
 #endif
+
+	#if defined(CONFIG_RTL_819X)
+	rtl_nat_init_hooks();
+	#endif
+
 	return 0;
 
  cleanup_extend:
@@ -842,6 +997,10 @@ static int __init nf_nat_init(void)
 static void __exit nf_nat_cleanup(void)
 {
 	unsigned int i;
+
+	#if defined(CONFIG_RTL_819X)
+	rtl_nat_cleanup_hooks();
+	#endif
 
 	unregister_pernet_subsys(&nf_nat_net_ops);
 	nf_ct_extend_unregister(&nat_extend);

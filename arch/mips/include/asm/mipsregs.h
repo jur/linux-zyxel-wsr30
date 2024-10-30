@@ -14,7 +14,6 @@
 #define _ASM_MIPSREGS_H
 
 #include <linux/linkage.h>
-#include <linux/types.h>
 #include <asm/hazards.h>
 #include <asm/war.h>
 
@@ -88,6 +87,14 @@
 #define CP0_CALG $17
 #define CP0_IWATCH $18
 #define CP0_DWATCH $19
+
+
+
+
+#define MIPS_CONF7_IAR         (_ULCAST_(1) << 10)
+#define MIPS_CONF7_AR          (_ULCAST_(1) << 16)
+
+
 
 /*
  * Coprocessor 0 Set 1 register names
@@ -461,6 +468,8 @@
 #define	 CAUSEF_IV		(_ULCAST_(1)   << 23)
 #define	 CAUSEB_PCI		26
 #define	 CAUSEF_PCI		(_ULCAST_(1)   << 26)
+#define  CAUSEB_DC		27
+#define  CAUSEF_DC		(_ULCAST_(1)   << 27)
 #define	 CAUSEB_CE		28
 #define	 CAUSEF_CE		(_ULCAST_(3)   << 28)
 #define	 CAUSEB_TI		30
@@ -605,7 +614,7 @@
 #define MIPS_CONF4_MMUEXTDEF_MMUSIZEEXT (_ULCAST_(1) << 14)
 
 #define MIPS_CONF6_SYND		(_ULCAST_(1) << 13)
-
+#define MIPS_CONF6_JRCD                (_ULCAST_(1) << 0)
 #define MIPS_CONF7_WII		(_ULCAST_(1) << 31)
 
 #define MIPS_CONF7_RPS		(_ULCAST_(1) << 2)
@@ -625,14 +634,14 @@
 #ifndef __ASSEMBLY__
 
 /*
- * Macros for handling the ISA mode bit for microMIPS.
+ * Macros for handling the ISA mode bit for MIPS16.
  */
 #define get_isa16_mode(x)		((x) & 0x1)
 #define msk_isa16_mode(x)		((x) & ~0x1)
 #define set_isa16_mode(x)		do { (x) |= 0x1; } while(0)
 
 /*
- * microMIPS instructions can be 16-bit or 32-bit in length. This
+ * MIPS16m instructions can be 16-bit or 32-bit in length. This
  * returns a 1 if the instruction is 16-bit and a 0 if 32-bit.
  */
 static inline int mm_insn_16bit(u16 insn)

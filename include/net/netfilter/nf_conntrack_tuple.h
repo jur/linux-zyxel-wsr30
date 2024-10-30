@@ -120,6 +120,7 @@ struct nf_conntrack_tuple_hash {
 	struct nf_conntrack_tuple tuple;
 };
 
+#ifdef CONFIG_NETFILTER
 static inline bool __nf_ct_tuple_src_equal(const struct nf_conntrack_tuple *t1,
 					   const struct nf_conntrack_tuple *t2)
 { 
@@ -150,7 +151,7 @@ nf_ct_tuple_mask_equal(const struct nf_conntrack_tuple_mask *m1,
 	return (nf_inet_addr_cmp(&m1->src.u3, &m2->src.u3) &&
 		m1->src.u.all == m2->src.u.all);
 }
-
+#endif
 static inline bool
 nf_ct_tuple_src_mask_cmp(const struct nf_conntrack_tuple *t1,
 			 const struct nf_conntrack_tuple *t2,
@@ -174,6 +175,7 @@ nf_ct_tuple_src_mask_cmp(const struct nf_conntrack_tuple *t1,
 	return true;
 }
 
+#ifdef CONFIG_NETFILTER
 static inline bool
 nf_ct_tuple_mask_cmp(const struct nf_conntrack_tuple *t,
 		     const struct nf_conntrack_tuple *tuple,
@@ -182,5 +184,5 @@ nf_ct_tuple_mask_cmp(const struct nf_conntrack_tuple *t,
 	return nf_ct_tuple_src_mask_cmp(t, tuple, mask) &&
 	       __nf_ct_tuple_dst_equal(t, tuple);
 }
-
+#endif
 #endif /* _NF_CONNTRACK_TUPLE_H */

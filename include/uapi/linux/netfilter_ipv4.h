@@ -61,8 +61,14 @@ enum nf_ip_hook_priorities {
 	NF_IP_PRI_SELINUX_FIRST = -225,
 	NF_IP_PRI_CONNTRACK = -200,
 	NF_IP_PRI_MANGLE = -150,
+	/*jwj: For packets match filter rule beforce dnat rule in PREROUTING when dmz enable.*/
+	#if defined(CONFIG_RTL_819X)
+	NF_IP_PRI_FILTER = -100,
+	NF_IP_PRI_NAT_DST = 0,
+	#else
 	NF_IP_PRI_NAT_DST = -100,
 	NF_IP_PRI_FILTER = 0,
+	#endif
 	NF_IP_PRI_SECURITY = 50,
 	NF_IP_PRI_NAT_SRC = 100,
 	NF_IP_PRI_SELINUX_LAST = 225,

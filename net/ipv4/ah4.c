@@ -12,6 +12,33 @@
 #include <linux/scatterlist.h>
 #include <net/icmp.h>
 #include <net/protocol.h>
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl_glue.h>
+
+#include "../../drivers/crypto/realtek/crypto_engine/rtl_ipsec.h"
+//#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
+#endif // CONFIG_CRYPTO_DEV_REALTEK
+extern int lock_ipsec_owner;
+extern spinlock_t lock_ipsec_engine;
+
+#if !defined(CONFIG_CRYPTO_DEV_REALTEK)
+#define SMP_LOCK_IPSEC \
+do { \
+} while(0)
+
+#define SMP_LOCK_BH_IPSEC \
+do { \
+} while(0)
+
+#define SMP_UNLOCK_BH_IPSEC \
+do { \
+} while(0)
+
+#define SMP_UNLOCK_IPSEC \
+do { \
+} while(0)
+#endif
 
 struct ah_skb_cb {
 	struct xfrm_skb_cb xfrm;
@@ -159,10 +186,10 @@ static int ah_output(struct xfrm_state *x, struct sk_buff *skb)
 	ahp = x->data;
 	ahash = ahp->ahash;
 
+	SMP_LOCK_BH_IPSEC;
 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
 		goto out;
 	nfrags = err;
-
 	skb_push(skb, -skb_network_offset(skb));
 	ah = ip_auth_hdr(skb);
 	ihl = ip_hdrlen(skb);
@@ -241,6 +268,7 @@ static int ah_output(struct xfrm_state *x, struct sk_buff *skb)
 out_free:
 	kfree(iph);
 out:
+	SMP_UNLOCK_BH_IPSEC;
 	return err;
 }
 
@@ -296,6 +324,8 @@ static int ah_input(struct xfrm_state *x, struct sk_buff *skb)
 	struct ah_data *ahp;
 	int err = -ENOMEM;
 
+	
+	SMP_LOCK_IPSEC;
 	if (!pskb_may_pull(skb, sizeof(*ah)))
 		goto out;
 
@@ -330,7 +360,6 @@ static int ah_input(struct xfrm_state *x, struct sk_buff *skb)
 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
 		goto out;
 	nfrags = err;
-
 	ah = (struct ip_auth_hdr *)skb->data;
 	iph = ip_hdr(skb);
 	ihl = ip_hdrlen(skb);
@@ -394,6 +423,7 @@ static int ah_input(struct xfrm_state *x, struct sk_buff *skb)
 out_free:
 	kfree (work_iph);
 out:
+	SMP_UNLOCK_IPSEC;
 	return err;
 }
 

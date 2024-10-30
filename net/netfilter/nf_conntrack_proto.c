@@ -28,7 +28,11 @@
 #include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_core.h>
 
+#if defined(FAST_PATH_SPI_ENABLED)
+struct nf_conntrack_l4proto __rcu **nf_ct_protos[PF_MAX] __read_mostly;
+#else
 static struct nf_conntrack_l4proto __rcu **nf_ct_protos[PF_MAX] __read_mostly;
+#endif
 struct nf_conntrack_l3proto __rcu *nf_ct_l3protos[AF_MAX] __read_mostly;
 EXPORT_SYMBOL_GPL(nf_ct_l3protos);
 

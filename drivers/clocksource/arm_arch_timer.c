@@ -13,6 +13,7 @@
 #include <linux/device.h>
 #include <linux/smp.h>
 #include <linux/cpu.h>
+#include <linux/clk.h>
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
 #include <linux/of_irq.h>
@@ -20,6 +21,7 @@
 
 #include <asm/arch_timer.h>
 #include <asm/virt.h>
+#include <linux/irqchip/arm-gic.h>
 
 #include <clocksource/arm_arch_timer.h>
 
@@ -33,9 +35,21 @@ enum ppi_nr {
 	MAX_TIMER_PPI
 };
 
+#ifdef CONFIG_OF
 static int arch_timer_ppi[MAX_TIMER_PPI];
+#else
+static int arch_timer_ppi[MAX_TIMER_PPI] = {
+	GIC_IRQ_PHYS_STIMER,
+	GIC_IRQ_PHYS_NSTIMER,
+	GIC_IRQ_VIRT_TIMER,
+	GIC_IRQ_HYP_TIMER
+};
+#endif
 
 static struct clock_event_device __percpu *arch_timer_evt;
+#ifdef CONFIG_COMMON_CLK
+static struct clk *arch_timer_clk;
+#endif
 
 static bool arch_timer_use_virtual = true;
 
@@ -331,6 +345,70 @@ out:
 	return err;
 }
 
+#ifdef CONFIG_COMMON_CLK
+static int arch_timer_get_clock(void)
+{
+	int err;
+
+	arch_timer_clk = clk_get_sys("smp_ca7", NULL);
+
+	if (IS_ERR(arch_timer_clk)) {
+		pr_err("smp_ca7: clock not found %d\n",
+		       (int) PTR_ERR(arch_timer_clk));
+		return -1;
+	}
+
+	err = clk_prepare_enable(arch_timer_clk);
+	if (err) {
+		pr_err("smp_ca7: clock failed to prepare+enable: %d\n", err);
+		clk_put(arch_timer_clk);
+		return -1;
+	}
+
+	arch_timer_rate = clk_get_rate(arch_timer_clk);
+	return 0;
+}
+
+static void arch_timer_update_frequency(void *new_rate)
+{
+	arch_timer_rate = *((unsigned long *) new_rate);
+
+	clockevents_update_freq(__this_cpu_ptr(arch_timer_evt),
+				arch_timer_rate);
+}
+
+static int arch_timer_rate_change(struct notifier_block *nb,
+				  unsigned long flags, void *data)
+{
+	struct clk_notifier_data *cnd = data;
+
+	/*
+	 * The gtiemr clock events must be reprogrammed to account for the
+	 * new frequency.  The timer is local to a cpu, so cross-call to the
+	 * changing cpu.
+	 */
+	if (flags == POST_RATE_CHANGE)
+		on_each_cpu(arch_timer_update_frequency,
+			    (void *)&cnd->new_rate, 1);
+	return NOTIFY_OK;
+}
+
+static struct notifier_block arch_timer_clk_nb = {
+	.notifier_call = arch_timer_rate_change,
+};
+
+static int arch_timer_clk_init(void)
+{
+	if (arch_timer_evt && __this_cpu_ptr(arch_timer_evt)
+	    && !IS_ERR(arch_timer_clk))
+		return clk_notifier_register(arch_timer_clk,
+					     &arch_timer_clk_nb);
+	return 0;
+}
+core_initcall(arch_timer_clk_init);
+#endif
+
+#ifdef CONFIG_OF
 static void __init arch_timer_init(struct device_node *np)
 {
 	u32 freq;
@@ -373,3 +451,43 @@ static void __init arch_timer_init(struct device_node *np)
 }
 CLOCKSOURCE_OF_DECLARE(armv7_arch_timer, "arm,armv7-timer", arch_timer_init);
 CLOCKSOURCE_OF_DECLARE(armv8_arch_timer, "arm,armv8-timer", arch_timer_init);
+#else
+int __init arch_timer_init(bool use_virt)
+{
+	if (arch_timer_get_rate()) {
+		pr_warn("arch_timer: already initialized, skipping\n");
+		return -1;
+	}
+
+	/* Try to determine the frequency from the device tree or CNTFRQ */
+	arch_timer_get_clock();
+
+	/*
+	 * If HYP mode is available, we know that the physical timer
+	 * has been configured to be accessible from PL1. Use it, so
+	 * that a guest can use the virtual timer instead.
+	 *
+	 * If no interrupt provided for virtual timer, we'll have to
+	 * stick to the physical timer. It'd better be accessible...
+	 */
+	if (is_hyp_mode_available() || !arch_timer_ppi[VIRT_PPI]) {
+		arch_timer_use_virtual = false;
+
+		if (!arch_timer_ppi[PHYS_SECURE_PPI] ||
+		    !arch_timer_ppi[PHYS_NONSECURE_PPI]) {
+			pr_warn("arch_timer: No interrupt available, giving up\n");
+			return -1;
+		}
+	}
+
+	arch_timer_use_virtual = use_virt;
+	if (arch_timer_use_virtual)
+		arch_timer_read_counter = arch_counter_get_cntvct;
+	else
+		arch_timer_read_counter = arch_counter_get_cntpct;
+
+	arch_timer_register();
+	arch_timer_arch_init();
+	return 0;
+}
+#endif

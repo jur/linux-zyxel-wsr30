@@ -104,50 +104,59 @@ static void gic_eic_irq_dispatch(void)
 		spurious_interrupt();
 }
 
-static void __init vpe_local_setup(unsigned int numvpes)
+static void __init vpe_local_setup(unsigned int vpes, unsigned int flag, unsigned int intr)
 {
-	unsigned long timer_intr = GIC_INT_TMR;
-	unsigned long perf_intr = GIC_INT_PERFCTR;
 	unsigned int vpe_ctl;
 	int i;
 
 	if (cpu_has_veic) {
 		/*
-		 * GIC timer interrupt -> CPU HW Int X (vector X+2) ->
+		 * GIC timer/perfcnt interrupt -> CPU HW Int X (vector X+2) ->
 		 * map to pin X+2-1 (since GIC adds 1)
 		 */
-		timer_intr += (GIC_CPU_TO_VEC_OFFSET - GIC_PIN_TO_VEC_OFFSET);
-		/*
-		 * GIC perfcnt interrupt -> CPU HW Int X (vector X+2) ->
-		 * map to pin X+2-1 (since GIC adds 1)
-		 */
-		perf_intr += (GIC_CPU_TO_VEC_OFFSET - GIC_PIN_TO_VEC_OFFSET);
+		intr += (GIC_CPU_TO_VEC_OFFSET - GIC_PIN_TO_VEC_OFFSET);
 	}
 
+	flag &= GIC_FLAG_VPE_MASK;
 	/*
 	 * Setup the default performance counter timer interrupts
 	 * for all VPEs
 	 */
-	for (i = 0; i < numvpes; i++) {
+	for (i = 0; i < vpes; i++) {
 		GICWRITE(GIC_REG(VPE_LOCAL, GIC_VPE_OTHER_ADDR), i);
 
 		/* Are Interrupts locally routable? */
 		GICREAD(GIC_REG(VPE_OTHER, GIC_VPE_CTL), vpe_ctl);
-		if (vpe_ctl & GIC_VPE_CTL_TIMER_RTBL_MSK)
-			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_TIMER_MAP),
-				 GIC_MAP_TO_PIN_MSK | timer_intr);
-		if (cpu_has_veic) {
-			set_vi_handler(timer_intr + GIC_PIN_TO_VEC_OFFSET,
-				gic_eic_irq_dispatch);
-			gic_shared_intr_map[timer_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_TIMER_MSK;
-		}
-
-		if (vpe_ctl & GIC_VPE_CTL_PERFCNT_RTBL_MSK)
-			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_PERFCTR_MAP),
-				 GIC_MAP_TO_PIN_MSK | perf_intr);
-		if (cpu_has_veic) {
-			set_vi_handler(perf_intr + GIC_PIN_TO_VEC_OFFSET, gic_eic_irq_dispatch);
-			gic_shared_intr_map[perf_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_PERFCNT_MSK;
+		switch (flag) {
+		case GIC_FLAG_VPE_TIMER:
+			if (vpe_ctl & GIC_VPE_CTL_TIMER_RTBL_MSK)
+				GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_TIMER_MAP),
+					 GIC_MAP_TO_PIN_MSK | intr);
+			if (cpu_has_veic) {
+				set_vi_handler(intr + GIC_PIN_TO_VEC_OFFSET,
+					gic_eic_irq_dispatch);
+				gic_shared_intr_map[intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_TIMER_MSK;
+			}
+			break;
+		case GIC_FLAG_VPE_PERFCTR:
+			if (vpe_ctl & GIC_VPE_CTL_PERFCNT_RTBL_MSK)
+				GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_PERFCTR_MAP),
+					 GIC_MAP_TO_PIN_MSK | intr);
+			if (cpu_has_veic) {
+				set_vi_handler(intr + GIC_PIN_TO_VEC_OFFSET, gic_eic_irq_dispatch);
+				gic_shared_intr_map[intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_PERFCNT_MSK;
+			}
+			break;
+		case GIC_FLAG_VPE_SWINT0:
+			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_SWINT0_MAP),
+				 GIC_MAP_TO_PIN_MSK | intr);
+			break;
+		case GIC_FLAG_VPE_SWINT1:
+			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_SWINT1_MAP),
+				 GIC_MAP_TO_PIN_MSK | intr);
+			break;
+		default:
+			break;
 		}
 	}
 }
@@ -189,7 +198,13 @@ unsigned int gic_get_int(void)
 	bitmap_and(pending, pending, intrmask, GIC_NUM_INTRS);
 	bitmap_and(pending, pending, pcpu_mask, GIC_NUM_INTRS);
 
-	return find_first_bit(pending, GIC_NUM_INTRS);
+	i = find_first_bit(pending, GIC_NUM_INTRS);
+	if (i == GIC_NUM_INTRS)
+		return -1;
+
+	pr_debug("CPU%d: %s pend=%d\n", smp_processor_id(), __func__, i);
+
+	return i;
 }
 
 static void gic_mask_irq(struct irq_data *d)
@@ -219,16 +234,15 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *cpumask,
 
 	/* Assumption : cpumask refers to a single CPU */
 	spin_lock_irqsave(&gic_lock, flags);
-	for (;;) {
-		/* Re-route this IRQ */
-		GIC_SH_MAP_TO_VPE_SMASK(irq, first_cpu(tmp));
 
-		/* Update the pcpu_masks */
-		for (i = 0; i < NR_CPUS; i++)
-			clear_bit(irq, pcpu_masks[i].pcpu_mask);
-		set_bit(irq, pcpu_masks[first_cpu(tmp)].pcpu_mask);
+	/* Re-route this IRQ */
+	GIC_SH_MAP_TO_VPE_SMASK(irq, first_cpu(tmp));
 
-	}
+	/* Update the pcpu_masks */
+	for (i = 0; i < NR_CPUS; i++)
+		clear_bit(irq, pcpu_masks[i].pcpu_mask);
+	set_bit(irq, pcpu_masks[first_cpu(tmp)].pcpu_mask);
+
 	cpumask_copy(d->affinity, cpumask);
 	spin_unlock_irqrestore(&gic_lock, flags);
 
@@ -291,14 +305,45 @@ static void __init gic_setup_intr(unsigned int intr, unsigned int cpu,
 	/* Initialise per-cpu Interrupt software masks */
 	if (flags & GIC_FLAG_IPI)
 		set_bit(intr, pcpu_masks[cpu].pcpu_mask);
-	if ((flags & GIC_FLAG_TRANSPARENT) && (cpu_has_veic == 0))
-		GIC_SET_INTR_MASK(intr);
 	if (trigtype == GIC_TRIG_EDGE)
 		gic_irq_flags[intr] |= GIC_TRIG_EDGE;
 }
 
+/*
+ * Setup IPI interrupts
+ *
+ * IPI interrupts are installed at the end of gic_intr_map
+ * shown as follows:
+ *
+ * cpu0         resched		GIC_NUM_INTRS - NR_CPUS * 2
+ * cpu1         resched
+ * cpu2         resched
+ * cpu3         resched
+ * cpu0         call		GIC_NUM_INTRS - NR_CPUS
+ * cpu1         call
+ * cpu2         call
+ * cpu3         call
+ */
+
+void __init gic_setup_ipi(unsigned int *ipimap, unsigned int resched,
+			  unsigned int call)
+{
+	int cpu;
+
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+		gic_setup_intr(GIC_IPI_RESCHED(cpu), cpu, resched,
+			       GIC_POL_POS, GIC_TRIG_EDGE, GIC_FLAG_IPI);
+
+		gic_setup_intr(GIC_IPI_CALL(cpu), cpu, call,
+			       GIC_POL_POS, GIC_TRIG_EDGE, GIC_FLAG_IPI);
+
+		ipimap[cpu] |= (1 << (resched + 2));
+		ipimap[cpu] |= (1 << (call + 2));
+	}
+}
+
 static void __init gic_basic_init(int numintrs, int numvpes,
-			struct gic_intr_map *intrmap, int mapsize)
+			struct gic_intr_map *intrmap)
 {
 	unsigned int i, cpu;
 	unsigned int pin_offset = 0;
@@ -307,7 +352,16 @@ static void __init gic_basic_init(int numintrs, int numvpes,
 
 	/* Setup defaults */
 	for (i = 0; i < numintrs; i++) {
+
+#ifdef CONFIG_RTL_8198C
+		if(i<50)
+			GIC_SET_POLARITY(i, GIC_POL_POS);
+		else                    
+			GIC_SET_POLARITY(i, GIC_POL_NEG);
+#else
 		GIC_SET_POLARITY(i, GIC_POL_POS);
+#endif
+		
 		GIC_SET_TRIGGER(i, GIC_TRIG_LEVEL);
 		GIC_CLR_INTR_MASK(i);
 		if (i < GIC_NUM_INTRS) {
@@ -325,35 +379,53 @@ static void __init gic_basic_init(int numintrs, int numvpes,
 		pin_offset = (GIC_CPU_TO_VEC_OFFSET - GIC_PIN_TO_VEC_OFFSET);
 
 	/* Setup specifics */
-	for (i = 0; i < mapsize; i++) {
+	for (i = 0; i < GIC_NUM_INTRS; i++) {
 		cpu = intrmap[i].cpunum;
+
+		if (intrmap[i].flags & GIC_FLAG_VPE_MASK) {
+			vpe_local_setup(numvpes, intrmap[i].flags,
+					intrmap[i].pin);
+			continue;
+		}
+
+		irq_set_chip(gic_irq_base + i, &gic_irq_controller);
+
 		if (cpu == GIC_UNUSED)
 			continue;
 		if (cpu == 0 && i != 0 && intrmap[i].flags == 0)
 			continue;
+
 		gic_setup_intr(i,
 			intrmap[i].cpunum,
 			intrmap[i].pin + pin_offset,
 			intrmap[i].polarity,
 			intrmap[i].trigtype,
 			intrmap[i].flags);
+
+		irq_set_handler(gic_irq_base + i, handle_level_irq);
 	}
 
-	vpe_local_setup(numvpes);
+#ifdef CONFIG_SMP
+	/*
+	 * In case of SMP, interrupts are routed via GIC,
+	 * unmask all interrupts by default, and let GIC
+	 * do the routing
+	 */
+	change_c0_status(ST0_IM, 0xff00);
+#endif
 }
 
-void __init gic_init(unsigned long gic_base_addr,
-		     unsigned long gic_addrspace_size,
-		     struct gic_intr_map *intr_map, unsigned int intr_map_size,
-		     unsigned int irqbase)
+void __init gic_init(unsigned long gic_base_addr, unsigned long gic_base_size,
+		     struct gic_intr_map *intrmap, unsigned int irqbase)
 {
 	unsigned int gicconfig;
 	int numvpes, numintrs;
 
 	_gic_base = (unsigned long) ioremap_nocache(gic_base_addr,
-						    gic_addrspace_size);
+						    gic_base_size);
 	gic_irq_base = irqbase;
 
+	GCMPGCB(GICBA) = gic_base_addr | GCMP_GCB_GICBA_EN_MSK;
 	GICREAD(GIC_REG(SHARED, GIC_SH_CONFIG), gicconfig);
 	numintrs = (gicconfig & GIC_SH_CONFIG_NUMINTRS_MSK) >>
 		   GIC_SH_CONFIG_NUMINTRS_SHF;
@@ -363,7 +435,11 @@ void __init gic_init(unsigned long gic_base_addr,
 		  GIC_SH_CONFIG_NUMVPES_SHF;
 	numvpes = numvpes + 1;
 
-	gic_basic_init(numintrs, numvpes, intr_map, intr_map_size);
-
-	gic_platform_init(numintrs, &gic_irq_controller);
+#ifdef CONFIG_RTL_8198C
+	{
+	extern void gic_cascade_init(void);
+	gic_cascade_init();
+	}
+#endif
+	gic_basic_init(numintrs, numvpes, intrmap);
 }

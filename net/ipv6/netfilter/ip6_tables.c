@@ -86,6 +86,9 @@ ip6_packet_match(const struct sk_buff *skb,
 		 const char *indev,
 		 const char *outdev,
 		 const struct ip6t_ip6 *ip6info,
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+		char *switch_port,
+#endif
 		 unsigned int *protoff,
 		 int *fragoff, bool *hotdrop)
 {
@@ -111,7 +114,18 @@ ip6_packet_match(const struct sk_buff *skb,
 
 	ret = ifname_compare_aligned(indev, ip6info->iniface, ip6info->iniface_mask);
 
-	if (FWINV(ret != 0, IP6T_INV_VIA_IN)) {
+//jwj:use switch port dev to set skb->mark, then use skb->mark to decide route table
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	if (switch_port == NULL) 
+		switch_port = "";
+#endif 
+
+	if (
+		FWINV(ret != 0, IP6T_INV_VIA_IN)
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	      && (strcmp(switch_port, ip6info->iniface) != 0)
+#endif 
+		) {
 		dprintf("VIA in mismatch (%s vs %s).%s\n",
 			indev, ip6info->iniface,
 			ip6info->invflags&IP6T_INV_VIA_IN ?" (INV)":"");
@@ -364,6 +378,9 @@ ip6t_do_table(struct sk_buff *skb,
 		IP_NF_ASSERT(e);
 		acpar.thoff = 0;
 		if (!ip6_packet_match(skb, indev, outdev, &e->ipv6,
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+			skb->switch_port,
+#endif
 		    &acpar.thoff, &acpar.fragoff, &acpar.hotdrop)) {
  no_match:
 			e = ip6t_next_entry(e);

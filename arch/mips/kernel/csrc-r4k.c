@@ -22,7 +22,7 @@ static struct clocksource clocksource_mips = {
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
-int __init init_r4k_clocksource(void)
+int __init r4k_clocksource_init(void)
 {
 	if (!cpu_has_counter || !mips_hpt_frequency)
 		return -ENXIO;

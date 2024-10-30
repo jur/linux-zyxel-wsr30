@@ -20,7 +20,9 @@ menuconfig IPV6
 	  module will be called ipv6.
 
 if IPV6
-
+config RTL_IPV6READYLOGO 
+	bool "IPv6: ready logo patch"
+	default n
 config IPV6_PRIVACY
 	bool "IPv6: Privacy Extensions (RFC 3041) support"
 	---help---
@@ -264,4 +266,26 @@ config IPV6_PIMSM_V2
 	  Support for IPv6 PIM multicast routing protocol PIM-SMv2.
 	  If unsure, say N.
 
+config IPV6_DNSV6_MODE_SUPPORT
+        bool "IPV6 DNSV6 MODE SUPPORT"
+        default n
+
+config IPV6_RA_RDNSS_SUPPORT
+	bool "IPV6 RA RDNSS SUPPORT"
+	default n
+
+config IPV6_RA_DNSSL_SUPPORT
+	bool "IPV6 RA DNSSL SUPPORT"
+	depends on IPV6_RA_RDNSS_SUPPORT
+	default n
+
+config RTL_FAST_IPV6_DEBUG
+    tristate "Realtek Fast IPV6 DEBUG support"
+	depends on RTL_FAST_IPV6
+	default n
+
+config RTL_FAST_IPV6
+    tristate "Realtek Fast IPV6 support"
+    depends on NF_CONNTRACK_IPV6
+	default n
 endif # IPV6

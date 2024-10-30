@@ -306,6 +306,9 @@ static struct sk_buff *igmpv3_newpack(struct net_device *dev, int size)
 	int hlen = LL_RESERVED_SPACE(dev);
 	int tlen = dev->needed_tailroom;
 
+#ifdef CONFIG_RTL_IGMP_PROXY_MULTIWAN
+	struct in_device *in_dev;
+#endif
 	while (1) {
 		skb = alloc_skb(size + hlen + tlen,
 				GFP_ATOMIC | __GFP_NOWARN);
@@ -340,7 +343,15 @@ static struct sk_buff *igmpv3_newpack(struct net_device *dev, int size)
 	pip->frag_off = htons(IP_DF);
 	pip->ttl      = 1;
 	pip->daddr    = fl4.daddr;
+#ifdef CONFIG_RTL_IGMP_PROXY_MULTIWAN
+	in_dev = __in_dev_get_rtnl(dev);
+	if(in_dev && in_dev->ifa_list != NULL)
+		pip->saddr    = fl4.saddr;
+	else
+		pip->saddr	= 0;
+#else
 	pip->saddr    = fl4.saddr;
+#endif
 	pip->protocol = IPPROTO_IGMP;
 	pip->tot_len  = 0;	/* filled in later */
 	ip_select_ident(skb, NULL);
@@ -685,7 +696,14 @@ static int igmp_send_report(struct in_device *in_dev, struct ip_mc_list *pmc,
 	iph->frag_off = htons(IP_DF);
 	iph->ttl      = 1;
 	iph->daddr    = dst;
+#ifdef CONFIG_RTL_IGMP_PROXY_MULTIWAN
+	if(in_dev->ifa_list == NULL)
+		iph->saddr    = 0;
+	else
+		iph->saddr    = fl4.saddr;
+#else
 	iph->saddr    = fl4.saddr;
+#endif
 	iph->protocol = IPPROTO_IGMP;
 	ip_select_ident(skb, NULL);
 	((u8 *)&iph[1])[0] = IPOPT_RA;

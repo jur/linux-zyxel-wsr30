@@ -131,6 +131,9 @@ void panic(const char *fmt, ...)
 	if (!panic_blink)
 		panic_blink = no_blink;
 
+#if defined(CONFIG_RTL_WTDOG)
+	{ extern int is_fault; is_fault=1; } // set kernel fault flag	
+#endif
 	if (panic_timeout > 0) {
 		/*
 		 * Delay timeout seconds before rebooting the machine.

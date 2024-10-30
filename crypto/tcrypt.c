@@ -948,8 +948,11 @@ static inline int tcrypt_test(const char *alg)
 		ret = 0;
 	return ret;
 }
-
+#if defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
+int do_test(int m)
+#else	
 static int do_test(int m)
+#endif
 {
 	int i;
 	int ret = 0;
@@ -970,14 +973,18 @@ static int do_test(int m)
 
 	case 3:
 		ret += tcrypt_test("ecb(des)");
-		ret += tcrypt_test("cbc(des)");
+		ret += tcrypt_test("cbc(des)");		
+		#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
 		ret += tcrypt_test("ctr(des)");
+		#endif
 		break;
 
 	case 4:
 		ret += tcrypt_test("ecb(des3_ede)");
 		ret += tcrypt_test("cbc(des3_ede)");
+		#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
 		ret += tcrypt_test("ctr(des3_ede)");
+		#endif
 		break;
 
 	case 5:
@@ -1012,9 +1019,11 @@ static int do_test(int m)
 
 	case 10:
 		ret += tcrypt_test("ecb(aes)");
-		ret += tcrypt_test("cbc(aes)");
+		ret += tcrypt_test("cbc(aes)");		
+		#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
 		ret += tcrypt_test("lrw(aes)");
 		ret += tcrypt_test("xts(aes)");
+		#endif
 		ret += tcrypt_test("ctr(aes)");
 		ret += tcrypt_test("rfc3686(ctr(aes))");
 		break;
@@ -1808,6 +1817,7 @@ static int __init tcrypt_mod_init(void)
 			goto err_free_tv;
 	}
 
+	#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
 	if (alg)
 		err = do_alg_test(alg, type, mask);
 	else
@@ -1817,6 +1827,7 @@ static int __init tcrypt_mod_init(void)
 		printk(KERN_ERR "tcrypt: one or more tests failed!\n");
 		goto err_free_tv;
 	}
+	#endif
 
 	/* We intentionaly return -EAGAIN to prevent keeping the module,
 	 * unless we're running in fips mode. It does all its work from

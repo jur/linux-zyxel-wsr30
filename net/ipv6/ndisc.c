@@ -81,6 +81,24 @@ do {								\
 		net_##level##_ratelimited(fmt, ##__VA_ARGS__);	\
 } while (0)
 
+struct sock * nl_ra_sock=NULL;
+typedef struct RA_INFO_ITEM_T
+{
+	int enable;
+	int pid;
+	int slaacFail;
+	int icmp6_managed;
+	int icmp6_other;
+#ifdef CONFIG_IPV6_RA_RDNSS_SUPPORT
+	struct rdnss_info dnsinfo;
+#ifdef CONFIG_IPV6_RA_DNSSL_SUPPORT
+	struct dnssl_info dslinfo;
+#endif
+#endif
+} RA_INFO_ITEM_T, *RA_INFO_ITEM_Tp;
+RA_INFO_ITEM_T raInfoItem={0};
+
+
 static u32 ndisc_hash(const void *pkey,
 		      const struct net_device *dev,
 		      __u32 *hash_rnd);
@@ -193,6 +211,49 @@ static struct nd_opt_hdr *ndisc_next_useropt(struct nd_opt_hdr *cur,
 	} while(cur < end && !ndisc_is_useropt(cur));
 	return cur <= end && ndisc_is_useropt(cur) ? cur : NULL;
 }
+
+#ifdef CONFIG_IPV6_RA_RDNSS_SUPPORT 
+void parse_rdnss_opt(struct rdnss_info *rinfo)
+{
+		raInfoItem.dnsinfo=*rinfo;
+}
+#ifdef CONFIG_IPV6_RA_DNSSL_SUPPORT
+void parse_dnssl_opt(struct dnssl_info *dinfo)
+{
+		struct nd_opt_hdr *q=dinfo;
+		if(q->nd_opt_type == ND_OPT_DNSSL)
+		{
+			int i=0;
+			struct dnssl_info *dnsslinfo = (struct dnssl_info *)q;
+			raInfoItem.dslinfo= *dnsslinfo;
+			char *label = (char *)q + 8;
+			int label_len=0;
+			for (i = 0; i < (dnsslinfo->length)/2; i++) 
+			{
+				char *buff_ptr = raInfoItem.dslinfo.name_dsl[i];
+				memset(buff_ptr, 0, sizeof(raInfoItem.dslinfo.name_dsl[i]));
+				while (label[0] != '\0') {
+					label_len=label[0];
+					label++;
+					memcpy(buff_ptr, label, label_len);
+		
+					buff_ptr += label_len;
+
+					label += label_len;
+
+					if (label[0] == '\0')
+					{
+						label++;
+						break;
+					}
+					else
+						*buff_ptr++ = '.';
+				}
+			}
+		}
+}
+#endif
+#endif
 
 struct ndisc_options *ndisc_parse_options(u8 *opt, int opt_len,
 					  struct ndisc_options *ndopts)
@@ -657,6 +718,30 @@ static void ndisc_solicit(struct neighbour *neigh, struct sk_buff *skb)
 	if (skb && ipv6_chk_addr(dev_net(dev), &ipv6_hdr(skb)->saddr, dev, 1))
 		saddr = &ipv6_hdr(skb)->saddr;
 
+#if 0
+	if(saddr != NULL)
+	{
+	printk("%s %d saddr %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", __FUNCTION__, __LINE__, 
+		saddr->s6_addr[0],saddr->s6_addr[1],saddr->s6_addr[2],saddr->s6_addr[3],
+		saddr->s6_addr[4],saddr->s6_addr[5],saddr->s6_addr[6],saddr->s6_addr[7],
+		saddr->s6_addr[8],saddr->s6_addr[9],saddr->s6_addr[10],saddr->s6_addr[11],
+		saddr->s6_addr[12],saddr->s6_addr[13],saddr->s6_addr[14],saddr->s6_addr[15]);
+	}
+	printk("%s %d mcaddr %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", __FUNCTION__, __LINE__, 
+		mcaddr.s6_addr[0],mcaddr.s6_addr[1],mcaddr.s6_addr[2],mcaddr.s6_addr[3],
+		mcaddr.s6_addr[4],mcaddr.s6_addr[5],mcaddr.s6_addr[6],mcaddr.s6_addr[7],
+		mcaddr.s6_addr[8],mcaddr.s6_addr[9],mcaddr.s6_addr[10],mcaddr.s6_addr[11],
+		mcaddr.s6_addr[12],mcaddr.s6_addr[13],mcaddr.s6_addr[14],mcaddr.s6_addr[15]);
+	if(target != NULL)
+	{
+	printk("%s %d target %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", __FUNCTION__, __LINE__, 
+		target->s6_addr[0],target->s6_addr[1],target->s6_addr[2],target->s6_addr[3],
+		target->s6_addr[4],target->s6_addr[5],target->s6_addr[6],target->s6_addr[7],
+		target->s6_addr[8],target->s6_addr[9],target->s6_addr[10],target->s6_addr[11],
+		target->s6_addr[12],target->s6_addr[13],target->s6_addr[14],target->s6_addr[15]);
+	}
+#endif
+	
 	if ((probes -= neigh->parms->ucast_probes) < 0) {
 		if (!(neigh->nud_state & NUD_VALID)) {
 			ND_PRINTK(1, dbg,
@@ -1058,6 +1143,17 @@ errout:
 	rtnl_set_sk_err(net, RTNLGRP_ND_USEROPT, err);
 }
 
+void ra_netlink_receive (struct sk_buff *skb)
+{
+	int pid=0;
+	pid=rtk_nlrecvmsg(skb,sizeof(raInfoItem),&raInfoItem);
+	if(pid<0)
+	{
+		ND_PRINTK(1,err,"pid=%d\n",pid);
+		return;
+	}
+}
+
 static void ndisc_router_discovery(struct sk_buff *skb)
 {
 	struct ra_msg *ra_msg = (struct ra_msg *)skb_transport_header(skb);
@@ -1132,6 +1228,8 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 					IF_RA_MANAGED : 0) |
 				(ra_msg->icmph.icmp6_addrconf_other ?
 					IF_RA_OTHERCONF : 0);
+	raInfoItem.icmp6_managed=ra_msg->icmph.icmp6_addrconf_managed?1:0;
+	raInfoItem.icmp6_other=ra_msg->icmph.icmp6_addrconf_other?1:0;
 
 	if (!in6_dev->cnf.accept_ra_defrtr)
 		goto skip_defrtr;
@@ -1337,13 +1435,32 @@ skip_routeinfo:
 		for (p = ndopts.nd_useropts;
 		     p;
 		     p = ndisc_next_useropt(p, ndopts.nd_useropts_end)) {
-			ndisc_ra_useropt(skb, p);
+#ifdef CONFIG_IPV6_RA_RDNSS_SUPPORT
+			if(p->nd_opt_type==ND_OPT_RDNSS)
+			{
+				ndisc_ra_useropt(skb, p);
+				parse_rdnss_opt((struct rdnss_info *) p);
+			}
+#ifdef CONFIG_IPV6_RA_DNSSL_SUPPORT
+			if(p->nd_opt_type==ND_OPT_DNSSL)
+			{
+				ndisc_ra_useropt(skb, p);
+				parse_dnssl_opt((struct dnssl_info *) p);
+			}
+#endif
+#endif
 		}
 	}
 
 	if (ndopts.nd_opts_tgt_lladdr || ndopts.nd_opts_rh) {
 		ND_PRINTK(2, warn, "RA: invalid RA options\n");
 	}
+
+	if(raInfoItem.enable)
+	{
+		rtk_nlsendmsg(raInfoItem.pid,nl_ra_sock,sizeof(raInfoItem),&raInfoItem); 
+	}
+	
 out:
 	ip6_rt_put(rt);
 	if (neigh)
@@ -1684,6 +1801,13 @@ static int __net_init ndisc_net_init(struct net *net)
 	np->hop_limit = 255;
 	/* Do not loopback ndisc messages */
 	np->mc_loop = 0;
+	
+	struct netlink_kernel_cfg cfg = {
+		.cb_mutex=NULL,
+		.input=ra_netlink_receive,
+		.groups=0,
+	};
+	nl_ra_sock = netlink_kernel_create(&init_net, NETLINK_RTK_IPV6_RA, &cfg);
 
 	return 0;
 }

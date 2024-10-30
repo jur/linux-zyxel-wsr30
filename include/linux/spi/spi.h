@@ -87,6 +87,10 @@ struct spi_device {
 #define	SPI_LOOP	0x20			/* loopback mode */
 #define	SPI_NO_CS	0x40			/* 1 dev/bus, no chipselect */
 #define	SPI_READY	0x80			/* slave pulls low to pause */
+#define	SPI_TX_DUAL	0x100			/* transmit with 2 wires */
+#define	SPI_TX_QUAD	0x200			/* transmit with 4 wires */
+#define	SPI_RX_DUAL	0x400			/* receive with 2 wires */
+#define	SPI_RX_QUAD	0x800			/* receive with 4 wires */
 	u8			bits_per_word;
 	int			irq;
 	void			*controller_state;
@@ -519,6 +523,11 @@ struct spi_transfer {
 	dma_addr_t	rx_dma;
 
 	unsigned	cs_change:1;
+	unsigned	tx_nbits:3;
+	unsigned	rx_nbits:3;
+#define	SPI_NBITS_SINGLE	0x01 /* 1bit transfer */
+#define	SPI_NBITS_DUAL		0x02 /* 2bits transfer */
+#define	SPI_NBITS_QUAD		0x04 /* 4bits transfer */
 	u8		bits_per_word;
 	u16		delay_usecs;
 	u32		speed_hz;

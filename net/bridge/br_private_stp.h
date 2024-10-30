@@ -65,5 +65,10 @@ extern void br_topology_change_detection(struct net_bridge *br);
 /* br_stp_bpdu.c */
 extern void br_send_config_bpdu(struct net_bridge_port *, struct br_config_bpdu *);
 extern void br_send_tcn_bpdu(struct net_bridge_port *);
-
+#if defined (CONFIG_RTL_STP)
+int rtl_setSpanningTreePortState(struct net_bridge_port *p, unsigned int state);
+#endif
+#if defined(CONFIG_RTL_HW_STP)
+int rtl_sethwSpanningTreePortState(struct net_bridge_port *p, unsigned int state);
+#endif
 #endif

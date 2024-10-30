@@ -18,7 +18,17 @@
 #include <net/netfilter/nf_conntrack_extend.h>
 #include <net/netfilter/nf_conntrack_acct.h>
 
+#if defined(CONFIG_RTL_819X)
+#ifdef CONFIG_NF_CT_ACCT
+#define NF_CT_ACCT_DEFAULT 1
+#else
+#define NF_CT_ACCT_DEFAULT 0
+#endif
+
+static bool nf_ct_acct __read_mostly = NF_CT_ACCT_DEFAULT;
+#else
 static bool nf_ct_acct __read_mostly;
+#endif
 
 module_param_named(acct, nf_ct_acct, bool, 0644);
 MODULE_PARM_DESC(acct, "Enable connection tracking flow accounting.");
@@ -122,6 +132,13 @@ int nf_conntrack_acct_init(void)
 	int ret = nf_ct_extend_register(&acct_extend);
 	if (ret < 0)
 		pr_err("nf_conntrack_acct: Unable to register extension\n");
+
+#ifdef CONFIG_NF_CT_ACCT
+		printk(KERN_WARNING "CONFIG_NF_CT_ACCT is deprecated and will be removed soon. Please use\n");
+		printk(KERN_WARNING "nf_conntrack.acct=1 kernel paramater, acct=1 nf_conntrack module option or\n");
+		printk(KERN_WARNING "sysctl net.netfilter.nf_conntrack_acct=1 to enable it.\n");
+#endif
+
 	return ret;
 }
 

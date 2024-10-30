@@ -28,6 +28,11 @@
 #include <net/netlink.h>
 #include <net/act_api.h>
 #include <net/pkt_cls.h>
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl865x_netif.h>
+#include <net/rtl/rtl865x_outputQueue.h>
+#endif
 
 #define HTSIZE (PAGE_SIZE/sizeof(struct fw_filter *))
 
@@ -77,6 +82,61 @@ static inline int fw_hash(u32 handle)
 		return handle & (HTSIZE - 1);
 }
 
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+static int fw_classifyMark(__u32 mark, struct tcf_proto *tp,
+			  struct tcf_result *res)
+{
+	struct fw_head *head;
+	struct fw_filter *f;
+	u32 id;
+
+	head = (struct fw_head*)tp->root;
+	
+	if (head != NULL) {
+		id = mark & head->mask;
+		for (f=head->ht[fw_hash(id)]; f; f=f->next) {
+			if (f->id == id) {
+				*res = f->res;
+				return 0;
+			}
+		}
+	} else {
+		/* old method */
+		id = mark;
+		if (id && (TC_H_MAJ(id) == 0 || !(TC_H_MAJ(id^tp->q->handle)))) {
+			res->classid = id;
+			res->class = 0;
+			return 0;
+		}
+	}
+
+	return -1;
+}
+
+static int fw_arrange_rules(struct tcf_proto *tp)
+{
+	rtl865x_qos_rule_t	*qosRule;
+	struct tcf_result	res;
+
+	qosRule = rtl865x_qosRuleHead;
+	while(qosRule)
+	{
+		if (fw_classifyMark(qosRule->mark, tp, &res)==0)
+		{
+			qosRule->handle = res.classid;
+		}
+		else if(TC_H_MAJ(qosRule->handle)==TC_H_MAJ(tp->classid))
+			qosRule->handle = 0;
+
+		qosRule = qosRule->next;
+	}
+
+	rtl865x_qosArrangeRuleByNetif();
+	
+	return SUCCESS;
+}
+
+#endif
 static int fw_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 			  struct tcf_result *res)
 {
@@ -140,6 +200,9 @@ static int fw_init(struct tcf_proto *tp)
 
 static void fw_delete_filter(struct tcf_proto *tp, struct fw_filter *f)
 {
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	fw_arrange_rules(tp);
+#endif
 	tcf_unbind_filter(tp, &f->res);
 	tcf_exts_destroy(tp, &f->exts);
 	kfree(f);
@@ -227,6 +290,9 @@ fw_change_attrs(struct net *net, struct tcf_proto *tp, struct fw_filter *f,
 
 	tcf_exts_change(tp, &f->exts, &e);
 
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	fw_arrange_rules(tp);
+#endif
 	return 0;
 errout:
 	tcf_exts_destroy(tp, &e);
@@ -292,6 +358,9 @@ static int fw_change(struct net *net, struct sk_buff *in_skb,
 	tcf_tree_unlock(tp);
 
 	*arg = (unsigned long)f;
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	fw_arrange_rules(tp);
+#endif
 	return 0;
 
 errout:
@@ -377,6 +446,9 @@ nla_put_failure:
 static struct tcf_proto_ops cls_fw_ops __read_mostly = {
 	.kind		=	"fw",
 	.classify	=	fw_classify,
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	.classifyMark	=	fw_classifyMark,
+#endif
 	.init		=	fw_init,
 	.destroy	=	fw_destroy,
 	.get		=	fw_get,

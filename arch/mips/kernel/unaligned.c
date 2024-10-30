@@ -72,6 +72,7 @@
  *	 A store crossing a page boundary might be executed only partially.
  *	 Undo the partial store in this case.
  */
+#include <linux/context_tracking.h>
 #include <linux/mm.h>
 #include <linux/signal.h>
 #include <linux/smp.h>
@@ -428,7 +429,9 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 	unsigned int res;
 	unsigned long origpc;
 	unsigned long orig31;
+#ifdef CONFIG_MIPS_FPU_EMU
 	void __user *fault_addr = NULL;
+#endif
 
 	origpc = (unsigned long)pc;
 	orig31 = regs->regs[31];
@@ -603,6 +606,7 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 	case swc1_op:
 	case sdc1_op:
 		die_if_kernel("Unaligned FP access in kernel code", regs);
+#ifdef CONFIG_MIPS_FPU_EMU
 		BUG_ON(!used_math());
 
 		lose_fpu(1);	/* Save FPU state for the emulator. */
@@ -616,27 +620,9 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 		if (res == 0)
 			break;
 		return;
-
-	/*
-	 * COP2 is available to implementor for application specific use.
-	 * It's up to applications to register a notifier chain and do
-	 * whatever they have to do, including possible sending of signals.
-	 */
-	case lwc2_op:
-		cu2_notifier_call_chain(CU2_LWC2_OP, regs);
-		break;
-
-	case ldc2_op:
-		cu2_notifier_call_chain(CU2_LDC2_OP, regs);
-		break;
-
-	case swc2_op:
-		cu2_notifier_call_chain(CU2_SWC2_OP, regs);
-		break;
-
-	case sdc2_op:
-		cu2_notifier_call_chain(CU2_SDC2_OP, regs);
-		break;
+#else
+		goto sigbus;
+#endif
 
 	default:
 		/*
@@ -683,7 +669,8 @@ const int reg16to32[] = { 16, 17, 2, 3, 4, 5, 6, 7 };
 /* Recode table from 16-bit STORE register notation to 32-bit GPR. */
 const int reg16to32st[] = { 0, 17, 2, 3, 4, 5, 6, 7 };
 
-void emulate_load_store_microMIPS(struct pt_regs *regs, void __user * addr)
+#ifdef CONFIG_CPU_MICROMIPS
+void emulate_load_store_MIPS16m(struct pt_regs *regs, void __user * addr)
 {
 	unsigned long value;
 	unsigned int res;
@@ -696,7 +683,9 @@ void emulate_load_store_microMIPS(struct pt_regs *regs, void __user * addr)
 	unsigned long origpc, contpc;
 	union mips_instruction insn;
 	struct mm_decoded_insn mminsn;
+#ifdef CONFIG_MIPS_FPU_EMU
 	void __user *fault_addr = NULL;
+#endif
 
 	origpc = regs->cp0_epc;
 	orig31 = regs->regs[31];
@@ -1033,6 +1022,7 @@ fpu_emul:
 		regs->regs[31] = orig31;
 
 		die_if_kernel("Unaligned FP access in kernel code", regs);
+#ifdef CONFIG_MIPS_FPU_EMU
 		BUG_ON(!used_math());
 		BUG_ON(!is_fpu_owner());
 
@@ -1047,6 +1037,9 @@ fpu_emul:
 		if (res == 0)
 			goto success;
 		return;
+#else
+		goto sigbus;
+#endif
 
 	case mm_lh32_op:
 		reg = insn.mm_i_format.rt;
@@ -1302,6 +1295,7 @@ sigill:
 	    ("Unhandled kernel unaligned access or invalid instruction", regs);
 	force_sig(SIGILL, current);
 }
+#endif
 
 static void emulate_load_store_MIPS16e(struct pt_regs *regs, void __user * addr)
 {
@@ -1547,11 +1541,14 @@ sigill:
 	    ("Unhandled kernel unaligned access or invalid instruction", regs);
 	force_sig(SIGILL, current);
 }
+
 asmlinkage void do_ade(struct pt_regs *regs)
 {
+	enum ctx_state prev_state;
 	unsigned int __user *pc;
 	mm_segment_t seg;
 
+	prev_state = exception_enter();
 	perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS,
 			1, regs, regs->cp0_badvaddr);
 	/*
@@ -1571,7 +1568,7 @@ asmlinkage void do_ade(struct pt_regs *regs)
 	 */
 
 	/*
-	 * Are we running in microMIPS mode?
+	 * Are we running in MIPS16m mode?
 	 */
 	if (get_isa16_mode(regs->cp0_epc)) {
 		/*
@@ -1583,16 +1580,18 @@ asmlinkage void do_ade(struct pt_regs *regs)
 		if (unaligned_action == UNALIGNED_ACTION_SHOW)
 			show_registers(regs);
 
+#ifdef CONFIG_CPU_MICROMIPS
 		if (cpu_has_mmips) {
 			seg = get_fs();
 			if (!user_mode(regs))
 				set_fs(KERNEL_DS);
-			emulate_load_store_microMIPS(regs,
+			emulate_load_store_MIPS16m(regs,
 				(void __user *)regs->cp0_badvaddr);
 			set_fs(seg);
 
 			return;
 		}
+#endif
 
 		if (cpu_has_mips16) {
 			seg = get_fs();
@@ -1603,7 +1602,7 @@ asmlinkage void do_ade(struct pt_regs *regs)
 			set_fs(seg);
 
 			return;
-	}
+		}
 
 		goto sigbus;
 	}
@@ -1627,6 +1626,7 @@ sigbus:
 	/*
 	 * XXX On return from the signal handler we should advance the epc
 	 */
+	exception_exit(prev_state);
 }
 
 #ifdef CONFIG_DEBUG_FS

@@ -248,12 +248,11 @@ irqreturn_t c0_compare_interrupt(int irq, void *dev_id)
 }
 
 
-int __cpuinit smtc_clockevent_init(void)
+int __cpuinit smtc_clockevent_init(int irq)
 {
 	uint64_t mips_freq = mips_hpt_frequency;
 	unsigned int cpu = smp_processor_id();
 	struct clock_event_device *cd;
-	unsigned int irq;
 	int i;
 	int j;
 
@@ -272,15 +271,6 @@ int __cpuinit smtc_clockevent_init(void)
 		if (!c0_compare_int_usable())
 			return -ENXIO;
 	}
-
-	/*
-	 * With vectored interrupts things are getting platform specific.
-	 * get_c0_compare_int is a hook to allow a platform to return the
-	 * interrupt number of it's liking.
-	 */
-	irq = MIPS_CPU_IRQ_BASE + cp0_compare_irq;
-	if (get_c0_compare_int)
-		irq = get_c0_compare_int();
 
 	cd = &per_cpu(mips_clockevent_device, cpu);
 

@@ -667,12 +667,16 @@ ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 static inline unsigned int ehci_readl(const struct ehci_hcd *ehci,
 		__u32 __iomem * regs)
 {
+#if defined(CONFIG_RTL_819X)
+			return (le32_to_cpu((*(volatile unsigned long *)(regs))));
+#else
 #ifdef CONFIG_USB_EHCI_BIG_ENDIAN_MMIO
 	return ehci_big_endian_mmio(ehci) ?
 		readl_be(regs) :
 		readl(regs);
 #else
 	return readl(regs);
+#endif
 #endif
 }
 
@@ -691,6 +695,9 @@ static inline void imx28_ehci_writel(const unsigned int val,
 static inline void ehci_writel(const struct ehci_hcd *ehci,
 		const unsigned int val, __u32 __iomem *regs)
 {
+#if defined(CONFIG_RTL_819X)
+			((*(volatile unsigned long *)(regs))=cpu_to_le32(val));
+#else
 #ifdef CONFIG_USB_EHCI_BIG_ENDIAN_MMIO
 	ehci_big_endian_mmio(ehci) ?
 		writel_be(val, regs) :
@@ -700,6 +707,7 @@ static inline void ehci_writel(const struct ehci_hcd *ehci,
 		imx28_ehci_writel(val, regs);
 	else
 		writel(val, regs);
+#endif
 #endif
 }
 

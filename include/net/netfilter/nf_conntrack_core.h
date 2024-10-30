@@ -65,6 +65,7 @@ nf_conntrack_find_get(struct net *net, u16 zone,
 extern int __nf_conntrack_confirm(struct sk_buff *skb);
 
 /* Confirm a connection: returns NF_DROP if packet must be dropped. */
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 static inline int nf_conntrack_confirm(struct sk_buff *skb)
 {
 	struct nf_conn *ct = (struct nf_conn *)skb->nfct;
@@ -78,7 +79,8 @@ static inline int nf_conntrack_confirm(struct sk_buff *skb)
 	}
 	return ret;
 }
-
+#endif
+	
 int
 print_tuple(struct seq_file *s, const struct nf_conntrack_tuple *tuple,
             const struct nf_conntrack_l3proto *l3proto,

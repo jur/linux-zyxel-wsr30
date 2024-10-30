@@ -63,11 +63,20 @@
  * let the USB host controller be busy for 5msec or more before an irq
  * is required, under load.  Jumbograms change the equation.
  */
+#if defined(CONFIG_USB_ARCH_HAS_XHCI)
+#define QLEN (300)
+#define RX_MAX_QUEUE_MEMORY (QLEN * 1518)
+#define	RX_QLEN(dev) (((dev)->udev->speed >= USB_SPEED_HIGH) ? \
+			(RX_MAX_QUEUE_MEMORY/(dev)->rx_urb_size) : 4)
+#define	TX_QLEN(dev) (((dev)->udev->speed >= USB_SPEED_HIGH) ? \
+			(RX_MAX_QUEUE_MEMORY/(dev)->hard_mtu) : 4)
+#else
 #define RX_MAX_QUEUE_MEMORY (60 * 1518)
 #define	RX_QLEN(dev) (((dev)->udev->speed == USB_SPEED_HIGH) ? \
 			(RX_MAX_QUEUE_MEMORY/(dev)->rx_urb_size) : 4)
 #define	TX_QLEN(dev) (((dev)->udev->speed == USB_SPEED_HIGH) ? \
 			(RX_MAX_QUEUE_MEMORY/(dev)->hard_mtu) : 4)
+#endif /* #if defined(CONFIG_USB_ARCH_HAS_XHCI) */
 
 // reawaken network queue this soon after stopping; else watchdog barks
 #define TX_TIMEOUT_JIFFIES	(5*HZ)
@@ -83,6 +92,11 @@
 
 // randomly generated ethernet address
 static u8	node_id [ETH_ALEN];
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+static u8	pnode_id [ETH_ALEN];
+struct net_device		*pnet_device;
+struct net_device		*realnet_device;
+#endif
 
 static const char driver_name [] = "usbnet";
 
@@ -92,6 +106,124 @@ module_param (msg_level, int, 0);
 MODULE_PARM_DESC (msg_level, "Override default message level");
 
 /*-------------------------------------------------------------------------*/
+
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+
+int pseudo_usbnet_open (struct net_device *net)
+{
+	printk("[%s:%d]\n", __FUNCTION__, __LINE__);
+	return 0;
+}
+
+int pseudo_usbnet_stop (struct net_device *net)
+{
+	printk("[%s:%d]\n", __FUNCTION__, __LINE__);
+	return 0;
+}
+
+netdev_tx_t pseudo_usbnet_start_xmit (struct sk_buff *skb,
+				     struct net_device *net)
+{
+
+	/*
+	 * IPv6 packet protocol type: 0x86dd, passThru...
+	 */
+	if(skb->data && skb->data[12]==0x86 && skb->data[13]==0xdd)
+	{
+		skb->dev = realnet_device;
+		usbnet_start_xmit(skb, realnet_device);
+	}
+	return NETDEV_TX_OK ;
+}
+
+int pseudo_usbnet_change_mtu (struct net_device *net, int new_mtu)
+{
+	if (new_mtu <= 0)
+		return -EINVAL;
+	net->mtu = new_mtu;
+
+	return 0;
+}
+
+int pseudo_eth_mac_addr(struct net_device *dev, void *p)
+{
+	int ret;
+
+	ret = eth_prepare_mac_addr_change(dev, p);
+	if (ret < 0)
+		return ret;
+	eth_commit_mac_addr_change(dev, p);
+	return 0;
+}
+
+int pseudo_eth_validate_addr(struct net_device *dev)
+{
+	if (!is_valid_ether_addr(dev->dev_addr))
+		return -EADDRNOTAVAIL;
+
+	return 0;
+}
+
+static struct net_device_stats *pseudo_usbnet_get_stats(struct net_device *net)
+{
+	return &net->stats;
+}
+
+
+static const struct net_device_ops pseudo_usbnet_netdev_ops = {
+	.ndo_open		= pseudo_usbnet_open,
+	.ndo_stop		= pseudo_usbnet_stop,
+	.ndo_start_xmit		= pseudo_usbnet_start_xmit,
+	.ndo_tx_timeout		= NULL,
+	.ndo_change_mtu		= pseudo_usbnet_change_mtu,
+	.ndo_set_mac_address 	= pseudo_eth_mac_addr,
+	.ndo_validate_addr	= pseudo_eth_validate_addr,
+	.ndo_get_stats      = pseudo_usbnet_get_stats,
+};
+
+int pseudo_usbnet_get_settings (struct net_device *net, struct ethtool_cmd *cmd)
+{
+	return 0;
+}
+
+int pseudo_usbnet_set_settings (struct net_device *net, struct ethtool_cmd *cmd)
+{
+	return 0;
+}
+
+u32 pseudo_usbnet_get_link (struct net_device *net)
+{
+	return 1;
+}
+
+int pseudo_usbnet_nway_reset(struct net_device *net)
+{
+	return 0;
+}
+
+void pseudo_usbnet_get_drvinfo (struct net_device *net, struct ethtool_drvinfo *info)
+{
+	return ;
+}
+
+int pseudo_ethtool_op_get_ts_info(struct net_device *dev, struct ethtool_ts_info *info)
+{
+	return 0;
+}
+
+static const struct ethtool_ops pseudo_usbnet_ethtool_ops = {
+	.get_settings		= pseudo_usbnet_get_settings,
+	.set_settings		= pseudo_usbnet_set_settings,
+	.get_link		= pseudo_usbnet_get_link,
+	.nway_reset		= pseudo_usbnet_nway_reset,
+	.get_drvinfo		= pseudo_usbnet_get_drvinfo,
+	.get_msglevel		= NULL,
+	.set_msglevel		= NULL,
+	.get_ts_info		= pseudo_ethtool_op_get_ts_info,
+};
+
+#endif
+
 
 /* handles CDC Ethernet and many other network "bulk data" interfaces */
 int usbnet_get_endpoints(struct usbnet *dev, struct usb_interface *intf)
@@ -228,8 +360,13 @@ static int init_status (struct usbnet *dev, struct usb_interface *intf)
 	maxp = usb_maxpacket (dev->udev, pipe, 0);
 
 	/* avoid 1 msec chatter:  min 8 msec poll rate */
+#if defined(CONFIG_USB_ARCH_HAS_XHCI)
+	period = max ((int) dev->status->desc.bInterval,
+		(dev->udev->speed >= USB_SPEED_HIGH) ? 7 : 3);
+#else
 	period = max ((int) dev->status->desc.bInterval,
 		(dev->udev->speed == USB_SPEED_HIGH) ? 7 : 3);
+#endif
 
 	buf = kmalloc (maxp, GFP_KERNEL);
 	if (buf) {
@@ -337,10 +474,45 @@ void usbnet_skb_return (struct usbnet *dev, struct sk_buff *skb)
 	if (skb_defer_rx_timestamp(skb))
 		return;
 
-	status = netif_rx (skb);
-	if (status != NET_RX_SUCCESS)
-		netif_dbg(dev, rx_err, dev->net,
-			  "netif_rx status %d\n", status);
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+	struct sk_buff *new_skb;
+	switch(dev->isPseudo)
+	{
+		case USBNET_PSEUDO_NEGTIVE:
+			status = netif_rx (skb);
+			if (status != NET_RX_SUCCESS)
+				netif_dbg(dev, rx_err, dev->net,
+				  "netif_rx status %d\n", status);
+			break;
+			
+		case USBNET_PSEUDO_BOTH:
+			new_skb = skb_copy(skb, GFP_ATOMIC);
+			status = netif_rx (new_skb);
+			if (status != NET_RX_SUCCESS)
+				netif_dbg(dev, rx_err, dev->net,
+				  "netif_rx status %d\n", status);
+			skb->dev = pnet_device;
+			status = netif_rx (skb);
+			if (status != NET_RX_SUCCESS)
+				netif_dbg(dev, rx_err, dev->net,
+				  "netif_rx status %d\n", status);
+			break;
+			
+		case USBNET_PSEUDO_YES:
+		default:
+			skb->dev = pnet_device;
+			status = netif_rx (skb);
+			if (status != NET_RX_SUCCESS)
+				netif_dbg(dev, rx_err, dev->net,
+				  "netif_rx status %d\n", status);
+			break;
+	}
+#else
+    status = netif_rx (skb);
+    if (status != NET_RX_SUCCESS)
+        netif_dbg(dev, rx_err, dev->net,
+                "netif_rx status %d\n", status);
+#endif
 }
 EXPORT_SYMBOL_GPL(usbnet_skb_return);
 
@@ -811,6 +983,10 @@ EXPORT_SYMBOL_GPL(usbnet_stop);
 
 // precondition: never called in_interrupt
 
+static struct net_device_stats *usbnet_get_stats(struct net_device *net){
+	struct usbnet *dev = netdev_priv(net);
+	return &dev->net->stats;
+}
 int usbnet_open (struct net_device *net)
 {
 	struct usbnet		*dev = netdev_priv(net);
@@ -1203,6 +1379,12 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
 	unsigned long		flags;
 	int retval;
 
+#ifdef CONFIG_RTL_819X
+	// For usb dma address alignment issue
+	int offset =0;
+	struct sk_buff *skb_new;
+#endif
+
 	if (skb)
 		skb_tx_timestamp(skb);
 
@@ -1229,6 +1411,19 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
 	entry->urb = urb;
 	entry->dev = dev;
 	entry->length = length;
+#ifdef CONFIG_RTL_819X
+	//For usb dma address alignment problem
+		offset = (u32)skb->data%4;
+		if( offset ) {
+			skb_new = skb_copy_expand(skb, skb_headroom(skb)+offset, 0, GFP_ATOMIC);
+			if (skb_new==NULL) {
+				offset = 0;
+				goto drop;
+			}
+			dev_kfree_skb(skb);
+			skb = skb_new;
+		}
+#endif
 
 	usb_fill_bulk_urb (urb, dev->udev, dev->out,
 			skb->data, skb->len, tx_complete, skb);
@@ -1419,6 +1614,13 @@ void usbnet_disconnect (struct usb_interface *intf)
 		   intf->dev.driver->name,
 		   xdev->bus->bus_name, xdev->devpath,
 		   dev->driver_info->description);
+	
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+	printk("unregister pnet_device for IPv6 passthru");
+	netif_device_detach (pnet_device);
+	unregister_netdev (pnet_device);
+	free_netdev(pnet_device);
+#endif
 
 	net = dev->net;
 	unregister_netdev (net);
@@ -1445,6 +1647,7 @@ static const struct net_device_ops usbnet_netdev_ops = {
 	.ndo_change_mtu		= usbnet_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_get_stats      = usbnet_get_stats,
 };
 
 /*-------------------------------------------------------------------------*/
@@ -1548,6 +1751,14 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 		if (status < 0)
 			goto out1;
 
+	/*
+	 * Reason to comment:
+	 *    If usb-ethernet device has already plugged in before power up, 
+	 *    interface eth0 will be allocated for usb-ethernet device
+	 *    the real eth0 can't be startup!!
+	 */
+#if 0
+	#ifndef CONFIG_4G_LTE_SUPPORT /* make LTE interface always be named as usbX */
 		// heuristic:  "usb%d" for links we know are two-host,
 		// else "eth%d" when there's reasonable doubt.  userspace
 		// can rename the link if it knows better.
@@ -1561,7 +1772,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 		/* WWAN devices should always be named "wwan%d" */
 		if ((dev->driver_info->flags & FLAG_WWAN) != 0)
 			strcpy(net->name, "wwan%d");
-
+	#endif /* #ifndef CONFIG_4G_LTE_SUPPORT */
+#endif
 		/* devices that cannot do ARP */
 		if ((dev->driver_info->flags & FLAG_NOARP) != 0)
 			net->flags |= IFF_NOARP;
@@ -1614,7 +1826,39 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 	if (dev->driver_info->flags & FLAG_LINK_INTR)
 		usbnet_link_change(dev, 0, 0);
 
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+	/*
+	 * Register a pseudo ethernet interface for IPv6 passthrough
+	 */
+	 // set up our own records
+	pnet_device = alloc_etherdev(0);
+	if (!pnet_device)
+		goto out4;
+	
+	/* netdev_printk() needs this so do it as early as possible */
+	//SET_NETDEV_DEV(net, &udev->dev);
+	strcpy (pnet_device->name, "pusb%d");
+	memcpy (pnet_device->dev_addr, pnode_id, sizeof pnode_id);
+
+	pnet_device->netdev_ops = &pseudo_usbnet_netdev_ops;
+	pnet_device->watchdog_timeo = TX_TIMEOUT_JIFFIES;
+	pnet_device->ethtool_ops = &pseudo_usbnet_ethtool_ops;
+	
+	status = register_netdev(pnet_device);
+	if (status)
+		goto out5;
+
+	realnet_device = net;
+	netif_device_attach (pnet_device);
+	printk("[%s:%d] create pnet_device for IPv6 passthru\n", __FUNCTION__, __LINE__);
+#endif
+
 	return 0;
+
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+out5:
+	free_netdev(pnet_device);
+#endif
 
 out4:
 	usb_free_urb(dev->interrupt);
@@ -1961,6 +2205,9 @@ static int __init usbnet_init(void)
 		FIELD_SIZEOF(struct sk_buff, cb) < sizeof(struct skb_data));
 
 	eth_random_addr(node_id);
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+	eth_random_addr(pnode_id);
+#endif
 	return 0;
 }
 module_init(usbnet_init);

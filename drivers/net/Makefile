@@ -26,6 +26,8 @@ obj-$(CONFIG_VXLAN) += vxlan.o
 #
 # Networking Drivers
 #
+obj-$(CONFIG_RTL_819X_SWCORE) += rtl819x/built-in.o
+subdir-$(CONFIG_RTL_819X_SWCORE) += rtl819x
 obj-$(CONFIG_ARCNET) += arcnet/
 obj-$(CONFIG_DEV_APPLETALK) += appletalk/
 obj-$(CONFIG_CAIF) += caif/
@@ -72,3 +74,9 @@ obj-$(CONFIG_USB_CDC_PHONET)   += usb/
 
 obj-$(CONFIG_HYPERV_NET) += hyperv/
 obj-$(CONFIG_NTB_NETDEV) += ntb_netdev.o
+
+#obj-$(CONFIG_RTL_819X_SWCORE) += rtl819x/built-in.o
+#subdir-$(CONFIG_RTL_819X_SWCORE) += rtl819x
+
+obj-$(CONFIG_RTK_VLAN_SUPPORT) += rtk_vlan.o
+

@@ -327,6 +327,9 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
 		    cmd == SIOCBRADDIF ||
 		    cmd == SIOCBRDELIF ||
 		    cmd == SIOCSHWTSTAMP ||
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+		    cmd == SIOCSITFGROUP ||
+#endif
 		    cmd == SIOCWANDEV) {
 			err = -EOPNOTSUPP;
 			if (ops->ndo_do_ioctl) {
@@ -521,6 +524,9 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 	case SIOCBRADDIF:
 	case SIOCBRDELIF:
 	case SIOCSHWTSTAMP:
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+	case SIOCSITFGROUP:
+#endif
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 		/* fall through */

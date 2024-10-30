@@ -1199,6 +1199,42 @@ EXPORT_SYMBOL_GPL(crypto_il_tab);
 	ctx->key_enc[8 * i + 15] = t;			\
 } while (0)
 
+#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+static int rtl_aes_set_key(struct crypto_tfm *tfm, const u8 *key,
+			   unsigned int keylen)
+{
+	struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
+	u8 *tmpkey = ctx->rtl_key;
+		
+	if (!tfm || !key){
+		return -EINVAL;
+	}
+		
+	memset((void *)tmpkey, 0x00, AES_MAX_KEY_SIZE);
+	memcpy((void *)tmpkey, (void *)key, keylen);	
+	return 0;
+}
+
+int rtl_aes_get_key(struct crypto_tfm *tfm, const u8 *key, u32 *keylen)
+{
+	struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
+	u8 *tmpkey = ctx->rtl_key;
+	
+	int i = 0;
+	
+	if (!tfm || !key || !keylen){
+		return -EINVAL;
+	}
+	
+	memcpy((void *)key, (void *)tmpkey, ctx->key_length);
+	*keylen = ctx->key_length;
+	
+	
+	return 0;
+}
+EXPORT_SYMBOL(rtl_aes_get_key);
+#endif
+
 /**
  * crypto_aes_expand_key - Expands the AES key as described in FIPS-197
  * @ctx:	The location where the computed key will be stored.
@@ -1287,6 +1323,11 @@ int crypto_aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
 	int ret;
 
 	ret = crypto_aes_expand_key(ctx, in_key, key_len);
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	if (!ret){
+		rtl_aes_set_key(tfm, in_key, key_len);
+	}
+	#endif
 	if (!ret)
 		return 0;
 

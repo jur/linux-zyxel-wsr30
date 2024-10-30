@@ -23,6 +23,10 @@
 
 #include <net/dst.h>
 
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
 /*
  * Theory of operations:
  * 1) We use a list, protected by a spinlock, to add
@@ -165,8 +169,17 @@ void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
 	struct dst_entry *dst;
 
 	if (ops->gc && dst_entries_get_fast(ops) > ops->gc_thresh) {
-		if (ops->gc(ops))
+    #if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+        if(rtl_dst_alloc_gc_pre_check_hooks(ops) == RTL_PS_HOOKS_RETURN)
 			return NULL;
+    #endif
+		if (ops->gc(ops))
+        {
+    #if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+			rtl_dst_alloc_gc_post_check1_hooks(ops);
+    #endif
+            return NULL;
+        }
 	}
 	dst = kmem_cache_alloc(ops->kmem_cachep, GFP_ATOMIC);
 	if (!dst)
@@ -200,6 +213,9 @@ void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
 	dst->next = NULL;
 	if (!(flags & DST_NOCOUNT))
 		dst_entries_add(ops, 1);
+    #if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	rtl_dst_alloc_gc_post_check2_hooks(ops, dst);
+    #endif
 	return dst;
 }
 EXPORT_SYMBOL(dst_alloc);

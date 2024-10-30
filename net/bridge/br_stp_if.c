@@ -19,6 +19,10 @@
 #include "br_private.h"
 #include "br_private_stp.h"
 
+#if defined (CONFIG_RTL_STP) || defined(CONFIG_RTL_HW_STP)
+#include <net/rtl/rtl_nic.h>
+#include <net/rtl/rtk_stp.h>
+#endif
 
 /* Port id is composed of priority and port number.
  * NB: some bits of priority are dropped to
@@ -38,6 +42,13 @@ void br_init_port(struct net_bridge_port *p)
 	p->port_id = br_make_port_id(p->priority, p->port_no);
 	br_become_designated_port(p);
 	p->state = BR_STATE_BLOCKING;
+	#if defined (CONFIG_RTL_STP)
+	rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_BLOCKING);
+	#endif
+			
+	#if defined(CONFIG_RTL_HW_STP)
+	rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_BLOCKING);
+	#endif
 	p->topology_change_ack = 0;
 	p->config_pending = 0;
 }
@@ -101,6 +112,9 @@ void br_stp_disable_port(struct net_bridge_port *p)
 	wasroot = br_is_root_bridge(br);
 	br_become_designated_port(p);
 	p->state = BR_STATE_DISABLED;
+#if defined(CONFIG_RTL_HW_STP)
+	rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_DISABLED);
+#endif
 	p->topology_change_ack = 0;
 	p->config_pending = 0;
 

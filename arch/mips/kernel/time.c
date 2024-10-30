@@ -71,56 +71,8 @@ EXPORT_SYMBOL(perf_irq);
 
 unsigned int mips_hpt_frequency;
 
-/*
- * This function exists in order to cause an error due to a duplicate
- * definition if platform code should have its own implementation.  The hook
- * to use instead is plat_time_init.  plat_time_init does not receive the
- * irqaction pointer argument anymore.	This is because any function which
- * initializes an interrupt timer now takes care of its own request_irq rsp.
- * setup_irq calls and each clock_event_device should use its own
- * struct irqrequest.
- */
-void __init plat_timer_setup(void)
-{
-	BUG();
-}
-
-static __init int cpu_has_mfc0_count_bug(void)
-{
-	switch (current_cpu_type()) {
-	case CPU_R4000PC:
-	case CPU_R4000SC:
-	case CPU_R4000MC:
-		/*
-		 * V3.0 is documented as suffering from the mfc0 from count bug.
-		 * Afaik this is the last version of the R4000.	 Later versions
-		 * were marketed as R4400.
-		 */
-		return 1;
-
-	case CPU_R4400PC:
-	case CPU_R4400SC:
-	case CPU_R4400MC:
-		/*
-		 * The published errata for the R4400 up to 3.0 say the CPU
-		 * has the mfc0 from count bug.
-		 */
-		if ((current_cpu_data.processor_id & 0xff) <= 0x30)
-			return 1;
-
-		/*
-		 * we assume newer revisions are ok
-		 */
-		return 0;
-	}
-
-	return 0;
-}
-
 void __init time_init(void)
 {
-	plat_time_init();
-
-	if (!mips_clockevent_init() || !cpu_has_mfc0_count_bug())
-		init_mips_clocksource();
+	extern void bsp_timer_init(void);
+	bsp_timer_init();
 }

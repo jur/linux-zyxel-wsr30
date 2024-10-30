@@ -43,7 +43,46 @@ struct nand_flash_dev nand_flash_ids[] = {
 	{"TC58NVG6D2 64G 3.3V 8-bit",
 		{ .id = {0x98, 0xde, 0x94, 0x82, 0x76, 0x56, 0x04, 0x20} },
 		  SZ_8K, SZ_8K, SZ_2M, 0, 8, 640},
+	
+	/* new chip not support in kernel3.10 */
+	{"MT29F8G08AB 8G 3.3V 8-bit",
+		{ .id = {0x2c, 0x38, 0x00, 0x26, 0x85, 0x00, 0x00, 0x00} },
+		  SZ_4K, SZ_1K, SZ_512K, 0, 8, 128},
+	
+	{"W25M01GV 1G SPI NAND",
+        { .id = {0xef, 0xaa, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_128, SZ_128K, 0, 3, 64},
 
+	{"W25M02GV 2G SPI NAND",
+        { .id = {0xef, 0xab, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_256, SZ_128K, 0, 3, 64},
+
+	{"ESMT F50L1G41A 1G SPI NAND",
+        { .id = {0xc8, 0x21, 0x7f, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_128, SZ_128K, 0, 3, 64},
+
+	{"MXIC MX35LF1GE4AB 1G SPI NAND",
+        { .id = {0xc2, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_128, SZ_128K, 0, 2, 64},
+
+	{"GD GD5F1GQ4U 1G SPI NAND",
+        { .id = {0xc8, 0xd1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_128, SZ_128K, 0, 2, 64},
+
+	/* Etron spi nand */
+	{"Etron	EM73C044SNB 1G SPI NAND",
+		{ .id = {0xd5, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_128, SZ_128K, 0, 2, 64},
+
+	{"Etron	EM73D044SNA 2G SPI NAND",
+		{ .id = {0xd5, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_2K, SZ_256, SZ_128K, 0, 2, 64},
+          
+	{"Etron	EM73E044SNA 4G SPI NAND",
+		{ .id = {0xd5, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} },
+          SZ_4K, SZ_512, SZ_256K, 0, 2, 128},
+		
+	
 	LEGACY_ID_NAND("NAND 4MiB 5V 8-bit",   0x6B, 4, SZ_8K, SP_OPTIONS),
 	LEGACY_ID_NAND("NAND 4MiB 3,3V 8-bit", 0xE3, 4, SZ_8K, SP_OPTIONS),
 	LEGACY_ID_NAND("NAND 4MiB 3,3V 8-bit", 0xE5, 4, SZ_8K, SP_OPTIONS),

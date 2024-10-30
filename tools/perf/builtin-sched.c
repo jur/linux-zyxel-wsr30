@@ -501,6 +501,8 @@ again:
 	BUG_ON(ret);
 
 	goto again;
+
+	return NULL;
 }
 
 static void create_tasks(struct perf_sched *sched)

@@ -43,84 +43,19 @@
  * Be careful when changing this, it has to be at most 128 bytes
  * to fit into space reserved for the exception handler.
  */
-NESTED(except_vec3_generic, 0, sp)
+NESTED(mips_trap_dispatch, 0, sp)
 	.set	push
 	.set	noat
-#if R5432_CP0_INTERRUPT_WAR
-	mfc0	k0, CP0_INDEX
-#endif
 	mfc0	k1, CP0_CAUSE
 	andi	k1, k1, 0x7c
-#ifdef CONFIG_64BIT
-	dsll	k1, k1, 1
-#endif
 	PTR_L	k0, exception_handlers(k1)
 	jr	k0
 	.set	pop
-	END(except_vec3_generic)
-
-/*
- * General exception handler for CPUs with virtual coherency exception.
- *
- * Be careful when changing this, it has to be at most 256 (as a special
- * exception) bytes to fit into space reserved for the exception handler.
- */
-NESTED(except_vec3_r4000, 0, sp)
-	.set	push
-	.set	mips3
-	.set	noat
-	mfc0	k1, CP0_CAUSE
-	li	k0, 31<<2
-	andi	k1, k1, 0x7c
-	.set	push
-	.set	noreorder
-	.set	nomacro
-	beq	k1, k0, handle_vced
-	 li	k0, 14<<2
-	beq	k1, k0, handle_vcei
-#ifdef CONFIG_64BIT
-	 dsll	k1, k1, 1
-#endif
-	.set	pop
-	PTR_L	k0, exception_handlers(k1)
-	jr	k0
-
-	/*
-	 * Big shit, we now may have two dirty primary cache lines for the same
-	 * physical address.  We can safely invalidate the line pointed to by
-	 * c0_badvaddr because after return from this exception handler the
-	 * load / store will be re-executed.
-	 */
-handle_vced:
-	MFC0	k0, CP0_BADVADDR
-	li	k1, -4					# Is this ...
-	and	k0, k1					# ... really needed?
-	mtc0	zero, CP0_TAGLO
-	cache	Index_Store_Tag_D, (k0)
-	cache	Hit_Writeback_Inv_SD, (k0)
-#ifdef CONFIG_PROC_FS
-	PTR_LA	k0, vced_count
-	lw	k1, (k0)
-	addiu	k1, 1
-	sw	k1, (k0)
-#endif
-	eret
-
-handle_vcei:
-	MFC0	k0, CP0_BADVADDR
-	cache	Hit_Writeback_Inv_SD, (k0)		# also cleans pi
-#ifdef CONFIG_PROC_FS
-	PTR_LA	k0, vcei_count
-	lw	k1, (k0)
-	addiu	k1, 1
-	sw	k1, (k0)
-#endif
-	eret
-	.set	pop
-	END(except_vec3_r4000)
+	END(mips_trap_dispatch)
 
 	__FINIT
 
+#ifndef CONFIG_CPU_HAS_WAITOFF
 	.align	5	/* 32 byte rollback region */
 LEAF(__r4k_wait)
 	.set	push
@@ -161,8 +96,11 @@ LEAF(__r4k_wait)
 9:
 	.set pop
 	.endm
-
-	.align	5
+#else
+	.macro  BUILD_ROLLBACK_PROLOGUE handler
+	.endm
+#endif
+	.align  5
 BUILD_ROLLBACK_PROLOGUE handle_int
 NESTED(handle_int, PT_SIZE, sp)
 #ifdef CONFIG_TRACE_IRQFLAGS
@@ -179,20 +117,10 @@ NESTED(handle_int, PT_SIZE, sp)
 	.set	push
 	.set	noat
 	mfc0	k0, CP0_STATUS
-#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
-	and	k0, ST0_IEP
-	bnez	k0, 1f
-
-	mfc0	k0, CP0_EPC
-	.set	noreorder
-	j	k0
-	rfe
-#else
 	and	k0, ST0_IE
 	bnez	k0, 1f
 
 	eret
-#endif
 1:
 	.set pop
 #endif
@@ -203,7 +131,7 @@ NESTED(handle_int, PT_SIZE, sp)
 	LONG_L	s0, TI_REGS($28)
 	LONG_S	sp, TI_REGS($28)
 	PTR_LA	ra, ret_from_irq
-	PTR_LA  v0, plat_irq_dispatch
+	PTR_LA  v0, bsp_irq_dispatch
 	jr	v0
 #ifdef CONFIG_CPU_MICROMIPS
 	nop
@@ -221,22 +149,9 @@ NESTED(handle_int, PT_SIZE, sp)
  * Be careful when changing this, it has to be at most 128 bytes
  * to fit into space reserved for the exception handler.
  */
-NESTED(except_vec4, 0, sp)
+NESTED(mips_trap_divec, 0, sp)
 1:	j	1b			/* Dummy, will be replaced */
-	END(except_vec4)
-
-/*
- * EJTAG debug exception handler.
- * The EJTAG debug exception entry point is 0xbfc00480, which
- * normally is in the boot PROM, so the boot PROM must do an
- * unconditional jump to this vector.
- */
-NESTED(except_vec_ejtag_debug, 0, sp)
-	j	ejtag_debug_handler
-#ifdef CONFIG_CPU_MICROMIPS
-	 nop
-#endif
-	END(except_vec_ejtag_debug)
+	END(mips_trap_divec)
 
 	__FINIT
 
@@ -245,7 +160,7 @@ NESTED(except_vec_ejtag_debug, 0, sp)
  * This prototype is copied to ebase + n*IntCtl.VS and patched
  * to invoke the handler
  */
-BUILD_ROLLBACK_PROLOGUE except_vec_vi
+#ifdef CONFIG_CPU_MIPSR2_IRQ_VI
 NESTED(except_vec_vi, 0, sp)
 	SAVE_SOME
 	SAVE_AT
@@ -316,43 +231,7 @@ NESTED(except_vec_vi_handler, 0, sp)
 	PTR_LA	ra, ret_from_irq
 	jr	v0
 	END(except_vec_vi_handler)
-
-/*
- * EJTAG debug exception handler.
- */
-NESTED(ejtag_debug_handler, PT_SIZE, sp)
-	.set	push
-	.set	noat
-	MTC0	k0, CP0_DESAVE
-	mfc0	k0, CP0_DEBUG
-
-	sll	k0, k0, 30	# Check for SDBBP.
-	bgez	k0, ejtag_return
-
-	PTR_LA	k0, ejtag_debug_buffer
-	LONG_S	k1, 0(k0)
-	SAVE_ALL
-	move	a0, sp
-	jal	ejtag_exception_handler
-	RESTORE_ALL
-	PTR_LA	k0, ejtag_debug_buffer
-	LONG_L	k1, 0(k0)
-
-ejtag_return:
-	MFC0	k0, CP0_DESAVE
-	.set	mips32
-	deret
-	.set pop
-	END(ejtag_debug_handler)
-
-/*
- * This buffer is reserved for the use of the EJTAG debug
- * handler.
- */
-	.data
-EXPORT(ejtag_debug_buffer)
-	.fill	LONGSIZE
-	.previous
+#endif
 
 	__INIT
 
@@ -396,6 +275,7 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	TRACE_IRQS_OFF
 	.endm
 
+#ifdef CONFIG_CPU_HAS_FPU
 	.macro	__build_clear_fpe
 	.set	push
 	/* gas fails to assemble cfc1 for some archs (octeon).*/ \
@@ -408,6 +288,7 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	TRACE_IRQS_ON
 	STI
 	.endm
+#endif
 
 	.macro	__build_clear_ade
 	MFC0	t0, CP0_BADVADDR
@@ -467,54 +348,34 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	BUILD_HANDLER cpu cpu sti silent		/* #11 */
 	BUILD_HANDLER ov ov sti silent			/* #12 */
 	BUILD_HANDLER tr tr sti silent			/* #13 */
+#ifdef CONFIG_CPU_HAS_FPU
 	BUILD_HANDLER fpe fpe fpe silent		/* #15 */
+#endif
 	BUILD_HANDLER mdmx mdmx sti silent		/* #22 */
-#ifdef	CONFIG_HARDWARE_WATCHPOINTS
+#ifdef CONFIG_CPU_HAS_WATCH
 	/*
 	 * For watch, interrupts will be enabled after the watch
 	 * registers are read.
 	 */
 	BUILD_HANDLER watch watch cli silent		/* #23 */
-#else
-	BUILD_HANDLER watch watch sti verbose		/* #23 */
 #endif
 	BUILD_HANDLER mcheck mcheck cli verbose		/* #24 */
+#ifdef CONFIG_CPU_HAS_MIPSMT
 	BUILD_HANDLER mt mt sti silent			/* #25 */
+#endif
+#ifdef CONFIG_CPU_HAS_DSP
 	BUILD_HANDLER dsp dsp sti silent		/* #26 */
+#endif
 	BUILD_HANDLER reserved reserved sti verbose	/* others */
 
+#ifndef CONFIG_CPU_HAS_RDHWR
 	.align	5
-	LEAF(handle_ri_rdhwr_vivt)
-#ifdef CONFIG_MIPS_MT_SMTC
-	PANIC_PIC("handle_ri_rdhwr_vivt called")
-#else
-	.set	push
-	.set	noat
-	.set	noreorder
-	/* check if TLB contains a entry for EPC */
-	MFC0	k1, CP0_ENTRYHI
-	andi	k1, 0xff	/* ASID_MASK */
-	MFC0	k0, CP0_EPC
-	PTR_SRL k0, _PAGE_SHIFT + 1
-	PTR_SLL k0, _PAGE_SHIFT + 1
-	or	k1, k0
-	MTC0	k1, CP0_ENTRYHI
-	mtc0_tlbw_hazard
-	tlbp
-	tlb_probe_hazard
-	mfc0	k1, CP0_INDEX
-	.set	pop
-	bltz	k1, handle_ri	/* slow path */
-	/* fall thru */
-#endif
-	END(handle_ri_rdhwr_vivt)
-
 	LEAF(handle_ri_rdhwr)
 	.set	push
 	.set	noat
 	.set	noreorder
 	/* MIPS32:    0x7c03e83b: rdhwr v1,$29 */
-	/* microMIPS: 0x007d6b3c: rdhwr v1,$29 */
+	/* MIPS16m:   0x007d6b3c: rdhwr v1,$29 */
 	MFC0	k1, CP0_EPC
 #if defined(CONFIG_CPU_MICROMIPS) || defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS64_R2)
 	and     k0, k1, 1
@@ -546,21 +407,7 @@ isrdhwr:
 	get_saved_sp	/* k1 := current_thread_info */
 	.set	noreorder
 	MFC0	k0, CP0_EPC
-#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
-	ori	k1, _THREAD_MASK
-	xori	k1, _THREAD_MASK
-	LONG_L	v1, TI_TP_VALUE(k1)
-	LONG_ADDIU	k0, 4
-	jr	k0
-	 rfe
-#else
-#ifndef CONFIG_CPU_DADDI_WORKAROUNDS
 	LONG_ADDIU	k0, 4		/* stall on $k0 */
-#else
-	.set	at=v1
-	LONG_ADDIU	k0, 4
-	.set	noat
-#endif
 	MTC0	k0, CP0_EPC
 	/* I hope three instructions between MTC0 and ERET are enough... */
 	ori	k1, _THREAD_MASK
@@ -569,14 +416,6 @@ isrdhwr:
 	.set	mips3
 	eret
 	.set	mips0
-#endif
 	.set	pop
 	END(handle_ri_rdhwr)
-
-#ifdef CONFIG_64BIT
-/* A temporary overflow handler used by check_daddi(). */
-
-	__INIT
-
-	BUILD_HANDLER  daddi_ov daddi_ov none silent	/* #12 */
 #endif

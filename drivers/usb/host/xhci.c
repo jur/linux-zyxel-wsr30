@@ -189,7 +189,7 @@ int xhci_reset(struct xhci_hcd *xhci)
 	return ret;
 }
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_XHCI_PCI
 static int xhci_free_msi(struct xhci_hcd *xhci)
 {
 	int i;
@@ -747,8 +747,10 @@ void xhci_stop(struct usb_hcd *hcd)
 				__func__);
 	}
 
+#ifdef CONFIG_USB_XHCI_PCI
 	if (xhci->quirks & XHCI_AMD_PLL_FIX)
 		usb_amd_dev_put();
+#endif
 
 	xhci_dbg(xhci, "// Disabling event ring interrupts\n");
 	temp = xhci_readl(xhci, &xhci->op_regs->status);
@@ -777,9 +779,10 @@ void xhci_shutdown(struct usb_hcd *hcd)
 {
 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
 
+	#if !defined(CONFIG_RTL_8198C)
 	if (xhci->quirks & XHCI_SPURIOUS_REBOOT)
 		usb_disable_xhci_ports(to_pci_dev(hcd->self.controller));
-
+	#endif
 	spin_lock_irq(&xhci->lock);
 	xhci_halt(xhci);
 	spin_unlock_irq(&xhci->lock);

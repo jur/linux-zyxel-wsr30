@@ -17,7 +17,7 @@ void mips_read_watch_registers(void);
 void mips_clear_watch_registers(void);
 void mips_probe_watch_registers(struct cpuinfo_mips *c);
 
-#ifdef CONFIG_HARDWARE_WATCHPOINTS
+#ifdef CONFIG_CPU_HAS_WATCH
 #define __restore_watch() do {						\
 	if (unlikely(test_bit(TIF_LOAD_WATCH,				\
 			      &current_thread_info()->flags))) {	\

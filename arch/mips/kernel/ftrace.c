@@ -104,12 +104,13 @@ static int ftrace_modify_code_2(unsigned long ip, unsigned int new_code1,
 				unsigned int new_code2)
 {
 	int faulted;
+	unsigned long ip2 = ip + 4;
 
 	safe_store_code(new_code1, ip, faulted);
 	if (unlikely(faulted))
 		return -EFAULT;
-	ip += 4;
-	safe_store_code(new_code2, ip, faulted);
+
+	safe_store_code(new_code2, ip2, faulted);
 	if (unlikely(faulted))
 		return -EFAULT;
 	flush_icache_range(ip, ip + 8); /* original ip + 12 */

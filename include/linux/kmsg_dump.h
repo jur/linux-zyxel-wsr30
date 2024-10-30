@@ -52,7 +52,7 @@ struct kmsg_dumper {
 	u64 next_seq;
 };
 
-#ifdef CONFIG_PRINTK
+#if defined( CONFIG_PRINTK )|| defined (CONFIG_PRINTK_FUNC)
 void kmsg_dump(enum kmsg_dump_reason reason);
 
 bool kmsg_dump_get_line_nolock(struct kmsg_dumper *dumper, bool syslog,

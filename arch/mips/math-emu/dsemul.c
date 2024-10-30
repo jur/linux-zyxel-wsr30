@@ -14,6 +14,7 @@
 #include <asm/mipsregs.h>
 #include <asm/cacheflush.h>
 
+#ifdef CONFIG_MIPS_FPU_EMU
 #include <asm/fpu_emulator.h>
 
 #include "ieee754.h"
@@ -182,3 +183,9 @@ int do_dsemulret(struct pt_regs *xcp)
 
 	return 1;
 }
+#else
+int do_dsemulret(struct pt_regs *xcp)
+{
+	return 0;
+}
+#endif /* CONFIG_MIPS_FPU_EMU */

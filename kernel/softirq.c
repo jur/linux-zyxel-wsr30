@@ -28,6 +28,10 @@
 #include <trace/events/irq.h>
 
 #include <asm/irq.h>
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/rtl_types.h>
+#endif
+
 /*
    - No shared variables, all the data are CPU local.
    - If a softirq needs serialization, let it serialize itself
@@ -155,7 +159,7 @@ EXPORT_SYMBOL(_local_bh_enable);
 
 static inline void _local_bh_enable_ip(unsigned long ip)
 {
-	WARN_ON_ONCE(in_irq() || irqs_disabled());
+	//WARN_ON_ONCE(in_irq() || irqs_disabled());
 #ifdef CONFIG_TRACE_IRQFLAGS
 	local_irq_disable();
 #endif
@@ -206,7 +210,13 @@ EXPORT_SYMBOL(local_bh_enable_ip);
  * should not be able to lock up the box.
  */
 #define MAX_SOFTIRQ_TIME  msecs_to_jiffies(2)
+
+#if defined(CONFIG_RTL_819X)
 #define MAX_SOFTIRQ_RESTART 10
+#else
+#define MAX_SOFTIRQ_RESTART 10
+#endif
+
 
 asmlinkage void __do_softirq(void)
 {
@@ -640,6 +650,9 @@ static int ksoftirqd_should_run(unsigned int cpu)
 
 static void run_ksoftirqd(unsigned int cpu)
 {
+	#if defined(CONFIG_RTL_819X)
+	set_user_nice(current, -20);
+	#endif
 	local_irq_disable();
 	if (local_softirq_pending()) {
 		__do_softirq();

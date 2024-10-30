@@ -11,6 +11,12 @@
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/netfilter_ipv6/ip6_tables.h>
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl865x_netif.h>
+#endif
+
+
 MODULE_DESCRIPTION("Xtables: TCP, UDP and UDP-Lite match");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("xt_tcp");
@@ -120,6 +126,44 @@ static bool tcp_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	return true;
 }
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static int tcp_match2acl(const char *tablename,
+			  const void *ip,
+			  const struct xt_match *match,
+			  void *matchinfo,
+			  void *acl_rule,
+			  unsigned int *invflags)
+{
+
+	const struct ipt_ip *ip_info = (struct ipt_ip *) ip;
+	const struct xt_tcp *tcpinfo = matchinfo;
+	rtl865x_AclRule_t * rule = (rtl865x_AclRule_t *)acl_rule;
+
+	if(ip == NULL || matchinfo == NULL)
+		return 1;
+
+	rule->ruleType_ = RTL865X_ACL_TCP;
+	rule->srcIpAddr_ 		= ip_info->src.s_addr;
+	rule->srcIpAddrMask_	= ip_info->smsk.s_addr;
+	rule->dstIpAddr_		= ip_info->dst.s_addr;
+	rule->dstIpAddrMask_	= ip_info->dmsk.s_addr;
+
+	rule->tcpSrcPortLB_	= tcpinfo->spts[0];
+	rule->tcpSrcPortUB_	= tcpinfo->spts[1];
+	rule->tcpDstPortLB_	= tcpinfo->dpts[0];
+	rule->tcpDstPortUB_	= tcpinfo->dpts[1];
+	rule->tcpFlag_		= tcpinfo->flg_cmp;
+	rule->tcpFlagMask_	= tcpinfo->flg_mask;
+
+	if(tcpinfo->invflags & (XT_TCP_INV_SRCPT | XT_TCP_INV_DSTPT | XT_TCP_INV_FLAGS))
+		if(invflags)
+			*invflags = 1;	
+	
+	return 0;
+}
+#endif
+
+
 static int tcp_mt_check(const struct xt_mtchk_param *par)
 {
 	const struct xt_tcp *tcpinfo = par->matchinfo;
@@ -155,6 +199,42 @@ static bool udp_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			      !!(udpinfo->invflags & XT_UDP_INV_DSTPT));
 }
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static int udp_match2acl(const char *tablename,
+			  const void *ip,
+			  const struct xt_match *match,
+			  void *matchinfo,
+			  void *acl_rule,
+			  unsigned int *invflags)
+{
+	const struct ipt_ip *ip_info = (struct ipt_ip *) ip;
+	const struct xt_udp *udpinfo = matchinfo;
+	rtl865x_AclRule_t *rule = (rtl865x_AclRule_t *)acl_rule;
+
+	if(ip == NULL || matchinfo == NULL)
+		return 1;
+
+	rule->ruleType_ = RTL865X_ACL_UDP;
+	rule->srcIpAddr_ 		= ip_info->src.s_addr;
+	rule->srcIpAddrMask_	= ip_info->smsk.s_addr;
+	rule->dstIpAddr_		= ip_info->dst.s_addr;
+	rule->dstIpAddrMask_	= ip_info->dmsk.s_addr;
+
+	rule->udpSrcPortLB_	= udpinfo->spts[0];
+	rule->udpSrcPortUB_	= udpinfo->spts[1];
+	rule->udpDstPortLB_	= udpinfo->dpts[0];
+	rule->udpDstPortUB_	= udpinfo->dpts[1];
+	
+
+	if(udpinfo->invflags & (XT_UDP_INV_SRCPT | XT_UDP_INV_DSTPT))
+		if(invflags)
+			*invflags = 1;	
+		
+	return 0;
+}
+#endif
+
+
 static int udp_mt_check(const struct xt_mtchk_param *par)
 {
 	const struct xt_udp *udpinfo = par->matchinfo;
@@ -172,6 +252,10 @@ static struct xt_match tcpudp_mt_reg[] __read_mostly = {
 		.matchsize	= sizeof(struct xt_tcp),
 		.proto		= IPPROTO_TCP,
 		.me		= THIS_MODULE,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+		.match2acl	= tcp_match2acl,
+#endif
+
 	},
 	{
 		.name		= "tcp",
@@ -181,6 +265,10 @@ static struct xt_match tcpudp_mt_reg[] __read_mostly = {
 		.matchsize	= sizeof(struct xt_tcp),
 		.proto		= IPPROTO_TCP,
 		.me		= THIS_MODULE,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+		.match2acl	= tcp_match2acl,
+#endif
+
 	},
 	{
 		.name		= "udp",
@@ -190,6 +278,10 @@ static struct xt_match tcpudp_mt_reg[] __read_mostly = {
 		.matchsize	= sizeof(struct xt_udp),
 		.proto		= IPPROTO_UDP,
 		.me		= THIS_MODULE,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+		.match2acl	= udp_match2acl,
+#endif
+
 	},
 	{
 		.name		= "udp",
@@ -199,6 +291,9 @@ static struct xt_match tcpudp_mt_reg[] __read_mostly = {
 		.matchsize	= sizeof(struct xt_udp),
 		.proto		= IPPROTO_UDP,
 		.me		= THIS_MODULE,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+		.match2acl	= udp_match2acl,
+#endif
 	},
 	{
 		.name		= "udplite",

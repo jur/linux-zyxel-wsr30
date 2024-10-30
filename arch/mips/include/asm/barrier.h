@@ -141,6 +141,16 @@
 
 #endif /* !CONFIG_CPU_HAS_WB */
 
+
+#define smp_store_release(p, v)                                         \
+do {                                                                    \
+        smp_mb();                                                       \
+        ACCESS_ONCE(*p) = (v);                                          \
+} while (0)
+
+
+
+
 #if defined(CONFIG_WEAK_ORDERING) && defined(CONFIG_SMP)
 # ifdef CONFIG_CPU_CAVIUM_OCTEON
 #  define smp_mb()	__sync()

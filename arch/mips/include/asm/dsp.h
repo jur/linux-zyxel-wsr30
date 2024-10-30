@@ -10,6 +10,7 @@
 #ifndef _ASM_DSP_H
 #define _ASM_DSP_H
 
+#ifdef CONFIG_CPU_HAS_DSP
 #include <asm/cpu.h>
 #include <asm/cpu-features.h>
 #include <asm/hazards.h>
@@ -81,5 +82,9 @@ do {									\
 									\
 	tsk->thread.dsp.dspr;						\
 })
+#else
+#define __save_dsp(tsk)		do { } while (0)
+#define __restore_dsp(tsk)	do { } while (0)
+#endif
 
 #endif /* _ASM_DSP_H */

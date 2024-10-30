@@ -601,5 +601,71 @@ int crypto_has_alg(const char *name, u32 type, u32 mask)
 }
 EXPORT_SYMBOL_GPL(crypto_has_alg);
 
+#if defined(CONFIG_PPP_MPPE_MPPC)
+int crypto_alg_available(const char *name, u32 flags)
+{
+       int ret = 0;
+       struct crypto_alg *alg = crypto_alg_mod_lookup(name, 0,
+                                                      CRYPTO_ALG_ASYNC);
+       
+       if (!IS_ERR(alg)) {
+               crypto_mod_put(alg);
+               ret = 1;
+       }
+       
+       return ret;
+}
+EXPORT_SYMBOL_GPL(crypto_alg_available);
+
+void crypto_digest_init(struct crypto_tfm *tfm)
+{
+       struct crypto_hash *hash = crypto_hash_cast(tfm);
+       struct hash_desc desc = { .tfm = hash, .flags = tfm->crt_flags };
+
+       crypto_hash_init(&desc);
+}
+EXPORT_SYMBOL_GPL(crypto_digest_init);
+
+void crypto_digest_update(struct crypto_tfm *tfm,
+                         struct scatterlist *sg, unsigned int nsg)
+{
+       struct crypto_hash *hash = crypto_hash_cast(tfm);
+       struct hash_desc desc = { .tfm = hash, .flags = tfm->crt_flags };
+       unsigned int nbytes = 0;
+       unsigned int i;
+
+       for (i = 0; i < nsg; i++)
+               nbytes += sg[i].length;
+
+       crypto_hash_update(&desc, sg, nbytes);
+}
+EXPORT_SYMBOL_GPL(crypto_digest_update);
+
+void crypto_digest_final(struct crypto_tfm *tfm, u8 *out)
+{
+       struct crypto_hash *hash = crypto_hash_cast(tfm);
+       struct hash_desc desc = { .tfm = hash, .flags = tfm->crt_flags };
+
+       crypto_hash_final(&desc, out);
+}
+EXPORT_SYMBOL_GPL(crypto_digest_final);
+
+void crypto_digest_digest(struct crypto_tfm *tfm,
+                         struct scatterlist *sg, unsigned int nsg, u8 *out)
+{
+       struct crypto_hash *hash = crypto_hash_cast(tfm);
+       struct hash_desc desc = { .tfm = hash, .flags = tfm->crt_flags };
+       unsigned int nbytes = 0;
+       unsigned int i;
+
+       for (i = 0; i < nsg; i++)
+               nbytes += sg[i].length;
+
+       crypto_hash_digest(&desc, sg, nbytes, out);
+}
+EXPORT_SYMBOL_GPL(crypto_digest_digest);
+#endif
+
+
 MODULE_DESCRIPTION("Cryptographic core API");
 MODULE_LICENSE("GPL");

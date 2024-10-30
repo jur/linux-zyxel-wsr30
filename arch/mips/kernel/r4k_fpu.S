@@ -11,7 +11,11 @@
  * Carsten Langgaard, carstenl@mips.com
  * Copyright (C) 2000 MIPS Technologies, Inc.
  * Copyright (C) 1999, 2001 Silicon Graphics, Inc.
+ *
+ * Modified for RLX Linux for MIPS
+ * Copyright (C) 2008-2011 Tony Wu (tonywu@realtek.com)
  */
+#ifdef CONFIG_CPU_HAS_FPU
 #include <asm/asm.h>
 #include <asm/errno.h>
 #include <asm/fpregdef.h>
@@ -186,3 +190,4 @@ LEAF(_restore_fp_context32)
 fault:	li	v0, -EFAULT				# failure
 	jr	ra
 	.end	fault
+#endif

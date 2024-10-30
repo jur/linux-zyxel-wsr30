@@ -37,15 +37,17 @@
 #include <asm/mipsregs.h>
 #include <asm/mipsmtregs.h>
 
+static int mips_cpu_irq_base;
+
 static inline void unmask_mips_irq(struct irq_data *d)
 {
-	set_c0_status(0x100 << (d->irq - MIPS_CPU_IRQ_BASE));
+	set_c0_status(0x100 << (d->irq - mips_cpu_irq_base));
 	irq_enable_hazard();
 }
 
 static inline void mask_mips_irq(struct irq_data *d)
 {
-	clear_c0_status(0x100 << (d->irq - MIPS_CPU_IRQ_BASE));
+	clear_c0_status(0x100 << (d->irq - mips_cpu_irq_base));
 	irq_disable_hazard();
 }
 
@@ -64,11 +66,12 @@ static struct irq_chip mips_cpu_irq_controller = {
  * Basically the same as above but taking care of all the MT stuff
  */
 
+#ifdef CONFIG_CPU_HAS_MIPSMT
 static unsigned int mips_mt_cpu_irq_startup(struct irq_data *d)
 {
 	unsigned int vpflags = dvpe();
 
-	clear_c0_cause(0x100 << (d->irq - MIPS_CPU_IRQ_BASE));
+	clear_c0_cause(0x100 << (d->irq - mips_cpu_irq_base));
 	evpe(vpflags);
 	unmask_mips_irq(d);
 	return 0;
@@ -81,7 +84,7 @@ static unsigned int mips_mt_cpu_irq_startup(struct irq_data *d)
 static void mips_mt_cpu_irq_ack(struct irq_data *d)
 {
 	unsigned int vpflags = dvpe();
-	clear_c0_cause(0x100 << (d->irq - MIPS_CPU_IRQ_BASE));
+	clear_c0_cause(0x100 << (d->irq - mips_cpu_irq_base));
 	evpe(vpflags);
 	mask_mips_irq(d);
 }
@@ -97,22 +100,24 @@ static struct irq_chip mips_mt_cpu_irq_controller = {
 	.irq_disable	= mask_mips_irq,
 	.irq_enable	= unmask_mips_irq,
 };
+#endif
 
-void __init mips_cpu_irq_init(void)
+void __init mips_cpu_irq_init(int irq_base)
 {
-	int irq_base = MIPS_CPU_IRQ_BASE;
 	int i;
 
+	mips_cpu_irq_base = irq_base;
 	/* Mask interrupts. */
 	clear_c0_status(ST0_IM);
 	clear_c0_cause(CAUSEF_IP);
 
 	/* Software interrupts are used for MT/CMT IPI */
-	for (i = irq_base; i < irq_base + 2; i++)
-		irq_set_chip_and_handler(i, cpu_has_mipsmt ?
-					 &mips_mt_cpu_irq_controller :
-					 &mips_cpu_irq_controller,
-					 handle_percpu_irq);
+#ifdef CONFIG_CPU_HAS_MIPSMT
+	if (cpu_has_mipsmt)
+		for (i = irq_base; i < irq_base + 2; i++)
+			irq_set_chip_and_handler(i, &mips_mt_cpu_irq_controller,
+						 handle_percpu_irq);
+#endif
 
 	for (i = irq_base + 2; i < irq_base + 8; i++)
 		irq_set_chip_and_handler(i, &mips_cpu_irq_controller,

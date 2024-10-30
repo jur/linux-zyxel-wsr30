@@ -65,10 +65,14 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 #endif
 	status |= KU_USER;
 	regs->cp0_status = status;
+#ifdef CONFIG_CPU_HAS_FPU
 	clear_used_math();
 	clear_fpu_owner();
+#endif
+#ifdef CONFIG_CPU_HAS_DSP
 	if (cpu_has_dsp)
 		__init_dsp();
+#endif
 	regs->cp0_epc = pc;
 	regs->regs[29] = sp;
 }
@@ -91,15 +95,21 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 
 	childksp = (unsigned long)task_stack_page(p) + THREAD_SIZE - 32;
 
+#if defined(CONFIG_CPU_HAS_FPU) || defined(CONFIG_CPU_HAS_DSP)
 	preempt_disable();
 
+#ifdef CONFIG_CPU_HAS_FPU
 	if (is_fpu_owner())
 		save_fp(p);
+#endif
 
+#ifdef CONFIG_CPU_HAS_DSP
 	if (cpu_has_dsp)
 		save_dsp(p);
+#endif
 
 	preempt_enable();
+#endif
 
 	/* set up new TSS. */
 	childregs = (struct pt_regs *) childksp - 1;
@@ -159,12 +169,14 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 }
 
 /* Fill in the fpu structure for a core dump.. */
+#ifdef CONFIG_CPU_HAS_FPU
 int dump_fpu(struct pt_regs *regs, elf_fpregset_t *r)
 {
 	memcpy(r, &current->thread.fpu, sizeof(current->thread.fpu));
 
 	return 1;
 }
+#endif
 
 void elf_dump_regs(elf_greg_t *gp, struct pt_regs *regs)
 {
@@ -194,12 +206,14 @@ int dump_task_regs(struct task_struct *tsk, elf_gregset_t *regs)
 	return 1;
 }
 
+#ifdef CONFIG_CPU_HAS_FPU
 int dump_task_fpu(struct task_struct *t, elf_fpregset_t *fpr)
 {
 	memcpy(fpr, &t->thread.fpu, sizeof(current->thread.fpu));
 
 	return 1;
 }
+#endif
 
 /*
  *
@@ -226,7 +240,7 @@ static inline int is_ra_save_ins(union mips_instruction *ip)
 	 * sw32 ra,offset(sp)
 	 * jradiussp - NOT SUPPORTED
 	 *
-	 * microMIPS is way more fun...
+	 * MIPS16m is way more fun...
 	 */
 	if (mm_insn_16bit(ip->halfword[0])) {
 		mmi.word = (ip->halfword[0] << 16);
@@ -263,7 +277,7 @@ static inline int is_jump_ins(union mips_instruction *ip)
 	 * jalr/jr,jalr.hb/jr.hb,jalrs,jalrs.hb
 	 * jraddiusp - NOT SUPPORTED
 	 *
-	 * microMIPS is kind of more fun...
+	 * MIPS16m is kind of more fun...
 	 */
 	union mips_instruction mmi;
 
@@ -297,7 +311,7 @@ static inline int is_sp_move_ins(union mips_instruction *ip)
 	 * addiu32 sp,sp,-imm
 	 * jradiussp - NOT SUPPORTED
 	 *
-	 * microMIPS is not more fun...
+	 * MIPS16m is not more fun...
 	 */
 	if (mm_insn_16bit(ip->halfword[0])) {
 		union mips_instruction mmi;

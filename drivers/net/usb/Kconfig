@@ -357,6 +357,13 @@ config USB_NET_CDC_SUBSET
 	  the host on the other end) very well.  Also, these devices will
 	  not generally have permanently assigned Ethernet addresses.
 
+config USB_NET_IPV6_PASSTHRU
+    boolean "USB network IPv6 Passthrough"
+    depends on USB_USBNET
+    default n
+    help
+        Make IPv6 packet passthrough LAN<-->WAN.
+
 config USB_ALI_M5632
 	boolean "ALi M5632 based 'USB 2.0 Data Link' cables"
 	depends on USB_NET_CDC_SUBSET
@@ -533,5 +540,11 @@ config USB_VL600
 
 	  http://ubuntuforums.org/showpost.php?p=10589647&postcount=17
 
+config USB_NET_LC5761
+	tristate "Leadcore LC5761"
+	depends on USB_NET_CDCETHER && TTY
+	help
+	  select this if you want to use an leadcore 5761 4G/TD-LTE usb dongle.
+	
 
 endmenu

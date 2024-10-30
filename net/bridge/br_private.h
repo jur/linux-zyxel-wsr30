@@ -20,6 +20,43 @@
 #include <net/route.h>
 #include <linux/if_vlan.h>
 
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+#define MULTICAST_MAC(mac) 	   ((mac[0]==0x01)&&(mac[1]==0x00)&&(mac[2]==0x5e))
+#define IPV6_MULTICAST_MAC(mac) ((mac[0]==0x33)&&(mac[1]==0x33) && mac[2]!=0xff)
+//#define CONFIG_BRIDGE_IGMPV3_SNOOPING
+
+//#define DEBUG_PRINT(fmt, args...) printk(fmt, ## args)
+#define DEBUG_PRINT(fmt, args...)
+
+#define MCAST_TO_UNICAST
+
+#define IGMP_EXPIRE_TIME (260*HZ)
+#define M2U_DELAY_DELETE_TIME (2*HZ)
+
+#if defined (MCAST_TO_UNICAST)
+#define IPV6_MCAST_TO_UNICAST
+#endif
+#ifndef M2U_DELETE_CHECK
+#define M2U_DELETE_CHECK
+#endif
+#define MLCST_FLTR_ENTRY	16
+#define MLCST_MAC_ENTRY		64
+
+extern int rtk_vlan_support_enable;
+// interface to set multicast bandwidth control
+//#define MULTICAST_BWCTRL
+
+// interface to enable MAC clone function
+//#define RTL_BRIDGE_MAC_CLONE
+//#define RTL_BRIDGE_DEBUG
+
+#define MCAST_QUERY_INTERVAL 30
+#endif/*CONFIG_RTL_IGMP_SNOOPING*/
+
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L2
+#define CONFIG_RTL865X_ETH
+#endif
+
 #define BR_HASH_BITS 8
 #define BR_HASH_SIZE (1 << BR_HASH_BITS)
 
@@ -42,6 +79,60 @@
 typedef struct bridge_id bridge_id;
 typedef struct mac_addr mac_addr;
 typedef __u16 port_id;
+#if defined(CONFIG_BRIDGE_IGMP_SNOOPING)
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
+
+#define DEBUG_PRINT(fmt, args...)
+#define MULTICAST_MAC(mac) 	   ((mac[0]==0x01)&&(mac[1]==0x00)&&(mac[2]==0x5e))
+#define IPV6_MULTICAST_MAC(mac) ((mac[0]==0x33)&&(mac[1]==0x33) && mac[2]!=0xff)
+#define MCAST_TO_UNICAST
+#if defined (MCAST_TO_UNICAST)
+#define IPV6_MCAST_TO_UNICAST
+#endif
+struct multicastFwdInfo
+{
+	unsigned int fwdPortMask;
+	char toCpu;
+};
+#endif
+#endif
+
+//#define CONFIG_RTK_GUEST_ZONE
+#ifdef CONFIG_RTK_GUEST_ZONE
+	#define MAX_LOCK_CLIENT		32
+//	#define DEBUG_GUEST_ZONE
+
+	enum ZONE_TYPE {
+		ZONE_TYPE_HOST,
+		ZONE_TYPE_GUEST,
+		ZONE_TYPE_GATEWAY
+	};
+#endif
+
+
+//#define DEBUG_GUEST_ZONE
+#ifdef DEBUG_GUEST_ZONE
+#define GZDEBUG(fmt, args...) panic_printk("[%s %d]"fmt,__FUNCTION__,__LINE__,## args)
+#else
+#define GZDEBUG(fmt, args...) {}
+#endif
+#if defined (CONFIG_RTL_IGMP_SNOOPING)||defined(CONFIG_BRIDGE_IGMP_SNOOPING)
+#define FDB_IGMP_EXT_NUM 8
+struct fdb_igmp_ext_entry
+{
+	int valid;
+	unsigned long ageing_time;
+	unsigned char SrcMac[6];	
+	unsigned char port;
+
+};
+
+struct fdb_igmp_ext_array
+{
+	struct fdb_igmp_ext_entry igmp_fdb_arr[FDB_IGMP_EXT_NUM];
+};
+
+#endif/*CONFIG_RTL_IGMP_SNOOPING*/
 
 struct bridge_id
 {
@@ -86,6 +177,13 @@ struct net_bridge_fdb_entry
 
 	struct rcu_head			rcu;
 	unsigned long			updated;
+#if defined (CONFIG_RTL_IGMP_SNOOPING)||defined(CONFIG_BRIDGE_IGMP_SNOOPING)
+	unsigned short group_src;
+	unsigned char	igmpFlag;
+	unsigned char	portlist;
+	int  portUsedNum[8];	// be used with portlist, for record each port has how many client
+	struct fdb_igmp_ext_entry igmp_fdb_arr[FDB_IGMP_EXT_NUM];
+#endif
 	unsigned long			used;
 	mac_addr			addr;
 	unsigned char			is_local;
@@ -177,7 +275,74 @@ struct net_bridge_port
 #ifdef CONFIG_BRIDGE_VLAN_FILTERING
 	struct net_port_vlans __rcu	*vlan_info;
 #endif
+#ifdef CONFIG_RTK_GUEST_ZONE
+	int	zone_type;	// 0: host zone, 1: guest zone, 2: gateway zone
+#endif
 };
+
+#if	defined(BATMAN_MESH)
+struct batadv_unicast_packet {
+	u8 packet_type;
+	u8 version;
+	u8 ttl;
+	u8 ttvn;		/* destination translation table version number */
+	u8 dest[ETH_ALEN];
+	/* "4 bytes boundary + 2 bytes" long to make the payload after the
+	 * following ethernet header again 4 bytes boundary aligned
+	 */
+};
+struct batadv_unicast_4addr_packet {
+	struct batadv_unicast_packet u;
+	u8 src[ETH_ALEN];
+	u8 subtype;
+	u8 reserved;
+	/* "4 bytes boundary + 2 bytes" long to make the payload after the
+	 * following ethernet header again 4 bytes boundary aligned
+	 */
+};
+typedef struct bast_bat {
+	struct hlist_node	list;
+	u8	src1[ETH_ALEN];
+	u8	dst1[ETH_ALEN];
+	u8	src[ETH_ALEN];
+	u8	dst[ETH_ALEN];
+	u8	orig[ETH_ALEN];
+	u8	dirty;
+	unsigned long	last_seen;			//time of last handle
+	int	iif;
+	struct net_device	*soft_iface;	//batman iface
+	struct net_device	*net_dev;		//output iface
+	u8	vlan;
+	struct vlan_hdr	vlan_data;
+	u8	batman;
+	u8	batman_type;
+	union	batman_header {
+		struct batadv_unicast_packet		u;
+		struct batadv_unicast_4addr_packet	u4;
+	}bat_data;
+}FAST_BAT;
+typedef struct  fast_local {
+	struct list_head	list;
+	u8	dst[ETH_ALEN];
+	unsigned long	last_seen;
+	u8	dirty;
+	u8	vlan;
+	int	iif;
+	struct net_device	*output_dev;
+}FAST_LOCAL;
+
+struct br_fastbat_ops {
+	int	(*fastbat_dispatch)(struct sk_buff *skb, FAST_BAT *bat, u16 vlan, u16 batman);
+	int	(*fastbat_filter_input_packet)(struct sk_buff *skb, u16 *vlan, u16 *batman);
+	FAST_BAT *(*fastbat_list_search)(u8 *src, u8 *dst);
+	struct ethhdr *(*fastbat_grab_real_ethhdr)(struct sk_buff *skb);
+	void (*fastbat_show_raw_data)(u8 *addr, u8 len);
+	FAST_LOCAL (*fastbat_local_search)(u8 *dest);
+	int (*fastbat_chk_and_add_local_entry)(struct sk_buff *, struct net_device *);
+	void (*fastbat_reset_header)(void *);
+	void (*fastbat_update_arrival_dev)(FAST_BAT *, int);
+};
+#endif
 
 #define br_port_exists(dev) (dev->priv_flags & IFF_BRIDGE_PORT)
 
@@ -279,7 +444,40 @@ struct net_bridge
 	u8				vlan_enabled;
 	struct net_port_vlans __rcu	*vlan_info;
 #endif
+
+#ifdef CONFIG_RTK_GUEST_ZONE
+	int	is_guest_isolated;	// isolate guest when 1
+	int	is_zone_isolated;	// isolate host and guest zone when 1
+	int	lock_client_num;
+	unsigned char lock_client_list[MAX_LOCK_CLIENT][6];
+	int gateway_mac_set;
+	unsigned char gateway_mac[6];
+#endif
+
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+	int igmpProxy_pid;
+	struct timer_list	mCastQuerytimer;
+#endif
+
+#if defined(CONFIG_RTK_MESH) 
+	int mesh_pathsel_pid;
+#endif
 };
+#if defined (CONFIG_RT_MULTIPLE_BR_SUPPORT)
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+
+struct igmg_register_info
+{
+	unsigned int valid;
+	unsigned int moduleIndex;
+	unsigned int swFwdPortMask;
+	struct net_bridge *br;
+	unsigned int mCastQueryTimerCnt;
+	//char name[16];
+};
+
+#endif
+#endif
 
 struct br_input_skb_cb {
 	struct net_device *brdev;
@@ -377,8 +575,17 @@ extern struct net_bridge_fdb_entry *__br_fdb_get(struct net_bridge *br,
 						 const unsigned char *addr,
 						 __u16 vid);
 extern int br_fdb_test_addr(struct net_device *dev, unsigned char *addr);
+#ifdef CONFIG_RTK_GUEST_ZONE
+extern int br_fdb_fillbuf(struct net_bridge *br, void *buf,
+			  unsigned long count, unsigned long off, int for_guest);
+#else
 extern int br_fdb_fillbuf(struct net_bridge *br, void *buf,
 			  unsigned long count, unsigned long off);
+#endif
+
+#ifdef A4_STA
+extern struct net_bridge_fdb_entry *fdb_find_for_driver(struct net_bridge *br, const unsigned char *addr);
+#endif
 extern int br_fdb_insert(struct net_bridge *br,
 			 struct net_bridge_port *source,
 			 const unsigned char *addr,
@@ -405,12 +612,21 @@ extern int br_fdb_dump(struct sk_buff *skb,
 extern void br_deliver(const struct net_bridge_port *to,
 		struct sk_buff *skb);
 extern int br_dev_queue_push_xmit(struct sk_buff *skb);
+#if defined(CONFIG_RTL_IGMP_SNOOPING)
+extern void br_forward(const struct net_bridge_port *to,
+		struct sk_buff *skb);
+#else
 extern void br_forward(const struct net_bridge_port *to,
 		struct sk_buff *skb, struct sk_buff *skb0);
+#endif
 extern int br_forward_finish(struct sk_buff *skb);
 extern void br_flood_deliver(struct net_bridge *br, struct sk_buff *skb);
+#if defined(CONFIG_RTL_IGMP_SNOOPING)
+extern void br_flood_forward(struct net_bridge *br, struct sk_buff *skb);
+#else
 extern void br_flood_forward(struct net_bridge *br, struct sk_buff *skb,
 			     struct sk_buff *skb2);
+#endif
 
 /* br_if.c */
 extern void br_port_carrier_check(struct net_bridge_port *p);
@@ -544,7 +760,17 @@ static inline void br_multicast_open(struct net_bridge *br)
 static inline void br_multicast_stop(struct net_bridge *br)
 {
 }
+#if defined (CONFIG_RTL_IGMP_SNOOPING)
+void br_multicast_deliver(struct net_bridge *br,
+			unsigned int fwdPortMask, 
+			struct sk_buff *skb,
+			int clone);
 
+void br_multicast_forward(struct net_bridge *br,
+                        unsigned int fwdPortMask,
+                        struct sk_buff *skb,
+                        int clone);
+#else
 static inline void br_multicast_deliver(struct net_bridge_mdb_entry *mdst,
 					struct sk_buff *skb)
 {
@@ -555,6 +781,7 @@ static inline void br_multicast_forward(struct net_bridge_mdb_entry *mdst,
 					struct sk_buff *skb2)
 {
 }
+#endif
 static inline bool br_multicast_is_router(struct net_bridge *br)
 {
 	return 0;
@@ -785,5 +1012,22 @@ static inline int br_sysfs_renameif(struct net_bridge_port *p) { return 0; }
 static inline int br_sysfs_addbr(struct net_device *dev) { return 0; }
 static inline void br_sysfs_delbr(struct net_device *dev) { return; }
 #endif /* CONFIG_SYSFS */
+
+#if defined CONFIG_RTL_IGMP_PROXY_MULTIWAN
+extern int rtl_smux_downstream_port_mapping_check(struct sk_buff *skb);
+#endif
+
+#ifdef CONFIG_RTK_MESH
+#define BRCTL_SET_MESH_PATHSELPID 111
+#define BRCTL_GET_MESH_PORTSTAT 112
+extern int br_set_meshpathsel_pid(int pid);
+extern int br_get_mesh_portstat(void);
+extern void br_signal_pathsel(struct net_bridge *br);
+#endif
+
+#if defined (CONFIG_RTL_MULTICAST_PORT_MAPPING)
+#define MAX_VLAN_NUM 16
+#endif
+#define TEST_PACKETS(mac) ((mac[0]==0x01 && mac[1]==0x00 && mac[2]==0x5e && mac[3]==0x01 &&mac[4]==0x02 &&mac[5]==0x03)||(mac[0]==0x33 && mac[1]==0x33 && mac[2]==0x00 && mac[3]==0x00 &&mac[4]==0x00 &&mac[5]==0x01))
 
 #endif

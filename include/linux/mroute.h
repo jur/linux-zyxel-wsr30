@@ -70,7 +70,9 @@ struct mfc_cache {
 	__be32 mfc_origin;			/* Source of packet 		*/
 	vifi_t mfc_parent;			/* Source interface		*/
 	int mfc_flags;				/* Flags on line		*/
-
+#if defined (CONFIG_RTL_IGMP_PROXY)
+	__u32 mfc_firstone;
+#endif
 	union {
 		struct {
 			unsigned long expires;

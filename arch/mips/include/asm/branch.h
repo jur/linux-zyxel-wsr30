@@ -11,11 +11,11 @@
 #include <asm/ptrace.h>
 #include <asm/inst.h>
 
-extern int __isa_exception_epc(struct pt_regs *regs);
 extern int __compute_return_epc(struct pt_regs *regs);
 extern int __compute_return_epc_for_insn(struct pt_regs *regs,
 					 union mips_instruction insn);
-extern int __microMIPS_compute_return_epc(struct pt_regs *regs);
+extern int __MIPS16_exception_epc(struct pt_regs *regs);
+extern int __MIPS16m_compute_return_epc(struct pt_regs *regs);
 extern int __MIPS16e_compute_return_epc(struct pt_regs *regs);
 
 
@@ -30,7 +30,7 @@ static inline unsigned long exception_epc(struct pt_regs *regs)
 		return regs->cp0_epc;
 
 	if (get_isa16_mode(regs->cp0_epc))
-		return __isa_exception_epc(regs);
+		return __MIPS16_exception_epc(regs);
 
 	return regs->cp0_epc + 4;
 }
@@ -41,7 +41,7 @@ static inline int compute_return_epc(struct pt_regs *regs)
 {
 	if (get_isa16_mode(regs->cp0_epc)) {
 		if (cpu_has_mmips)
-			return __microMIPS_compute_return_epc(regs);
+			return __MIPS16m_compute_return_epc(regs);
 		if (cpu_has_mips16)
 			return __MIPS16e_compute_return_epc(regs);
 		return regs->cp0_epc;

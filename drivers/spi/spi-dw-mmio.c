@@ -79,7 +79,7 @@ static int dw_spi_mmio_probe(struct platform_device *pdev)
 	clk_enable(dwsmmio->clk);
 
 	dws->parent_dev = &pdev->dev;
-	dws->bus_num = 0;
+	dws->bus_num = pdev->id;
 	dws->num_cs = 4;
 	dws->max_freq = clk_get_rate(dwsmmio->clk);
 

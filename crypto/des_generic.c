@@ -27,10 +27,16 @@
 
 struct des_ctx {
 	u32 expkey[DES_EXPKEY_WORDS];
+#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	u8 cbckey[DES_KEY_SIZE];
+#endif
 };
 
 struct des3_ede_ctx {
 	u32 expkey[DES3_EDE_EXPKEY_WORDS];
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	u8 cbckey[DES3_EDE_KEY_SIZE];
+	#endif
 };
 
 /* Lookup tables for key expansion */
@@ -778,6 +784,79 @@ static void dkey(u32 *pe, const u8 *k)
 	}
 }
 
+#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+
+
+static int rtl_des_set_cbckey(struct crypto_tfm *tfm, const u8 *key,
+			   unsigned int keylen)
+{
+	struct des_ctx *dctx = crypto_tfm_ctx(tfm);
+	u8 *tmpkey = dctx->cbckey;
+	
+	if (!tfm || !key){
+		return -EINVAL;
+	}
+	
+	memset((void *)tmpkey, 0x00, DES_KEY_SIZE);
+	memcpy((void *)tmpkey, (void *)key, keylen);
+		
+	return 0;
+}
+
+int rtl_des_get_cbckey(struct crypto_tfm *tfm, const u8 *key,
+			   unsigned int keylen)
+{
+	struct des_ctx *dctx = crypto_tfm_ctx(tfm);
+	u8 *tmpkey = dctx->cbckey;
+	
+	int i = 0;
+	
+	if (!tfm || !key){
+		return -EINVAL;
+	}
+
+	memcpy((void *)key, (void *)tmpkey, keylen);
+	
+	return 0;
+}
+
+static int rtl_des3_ede_set_cbckey(struct crypto_tfm *tfm, const u8 *key,
+			   unsigned int keylen)
+{
+	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
+	u8 *tmpkey = dctx->cbckey;
+	
+	if (!tfm || !key){
+		return -EINVAL;
+	}
+		
+	memset((void *)tmpkey, 0x00, DES3_EDE_KEY_SIZE);
+	memcpy((void *)tmpkey, (void *)key, keylen);	
+	
+	return 0;
+}
+
+int rtl_des3_ede_get_cbckey(struct crypto_tfm *tfm, const u8 *key,
+			   unsigned int keylen)
+{
+	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
+	u8 *tmpkey = dctx->cbckey;
+	
+	int i = 0;
+	
+	if (!tfm || !key){
+		return -EINVAL;
+	}
+
+	memcpy((void *)key, (void *)tmpkey, keylen);
+	
+	return 0;
+}
+
+EXPORT_SYMBOL(rtl_des3_ede_get_cbckey);
+EXPORT_SYMBOL(rtl_des_get_cbckey);
+#endif
+
 static int des_setkey(struct crypto_tfm *tfm, const u8 *key,
 		      unsigned int keylen)
 {
@@ -796,6 +875,10 @@ static int des_setkey(struct crypto_tfm *tfm, const u8 *key,
 
 	/* Copy to output */
 	memcpy(dctx->expkey, tmp, sizeof(dctx->expkey));
+
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	rtl_des_set_cbckey(tfm, key, keylen);
+	#endif	
 
 	return 0;
 }
@@ -866,6 +949,9 @@ static int des3_ede_setkey(struct crypto_tfm *tfm, const u8 *key,
 	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
 	u32 *expkey = dctx->expkey;
 	u32 *flags = &tfm->crt_flags;
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	u8 *tmp_key = key;
+	#endif
 
 	if (unlikely(!((K[0] ^ K[2]) | (K[1] ^ K[3])) ||
 		     !((K[2] ^ K[4]) | (K[3] ^ K[5]))) &&
@@ -877,6 +963,10 @@ static int des3_ede_setkey(struct crypto_tfm *tfm, const u8 *key,
 	des_ekey(expkey, key); expkey += DES_EXPKEY_WORDS; key += DES_KEY_SIZE;
 	dkey(expkey, key); expkey += DES_EXPKEY_WORDS; key += DES_KEY_SIZE;
 	des_ekey(expkey, key);
+	
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	rtl_des3_ede_set_cbckey(tfm, tmp_key, keylen);
+	#endif	
 
 	return 0;
 }

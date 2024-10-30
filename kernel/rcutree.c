@@ -958,7 +958,9 @@ static void check_cpu_stall(struct rcu_state *rsp, struct rcu_data *rdp)
 
 		/* We haven't checked in, so go dump stack. */
 		print_cpu_stall(rsp);
-
+#if defined(CONFIG_RTL_WTDOG)
+        { extern int is_fault; is_fault=1; } // set kernel fault flag   
+#endif
 	} else if (rcu_gp_in_progress(rsp) &&
 		   ULONG_CMP_GE(j, js + RCU_STALL_RAT_DELAY)) {
 

@@ -477,12 +477,92 @@ static ssize_t lp5562_store_engine_mux(struct device *dev,
 	return len;
 }
 
+#if defined(CONFIG_ZYXEL_LEDS_LP5562_W_PRED_PAT)
+/* check the size of program count */
+static inline bool _is_pc_w_overflow(struct lp55xx_predef_pattern *ptn)
+{
+	return (ptn->size_r >= LP5562_PROGRAM_LENGTH);
+}
+
+static int lp5562_run_predef_led_wpattern(struct lp55xx_chip *chip, int mode)
+{
+	struct lp55xx_predef_pattern *ptn;
+	int i;
+
+	if (mode == LP5562_PATTERN_OFF) {
+		lp5562_run_engine(chip, false);
+		return 0;
+	}
+
+	ptn = chip->pdata->wpatterns + (mode - 1);
+	if (!ptn || _is_pc_w_overflow(ptn)) {
+		dev_err(&chip->cl->dev, "invalid pattern data\n");
+		return -EINVAL;
+	}
+
+	lp5562_stop_engine(chip);
+
+	/* Set LED map as W */
+	lp55xx_write(chip, LP5562_REG_ENG_SEL, LP5562_ENG1_FOR_W);
+
+	/* Load engines */
+	chip->engine_idx = LP55XX_ENGINE_1;
+	lp5562_load_engine(chip);
+
+	/* Clear program registers */
+	lp55xx_write(chip, LP5562_REG_PROG_MEM_ENG1, 0);
+	lp55xx_write(chip, LP5562_REG_PROG_MEM_ENG1 + 1, 0);
+
+	/* Program engines */
+	lp5562_write_program_memory(chip, LP5562_REG_PROG_MEM_ENG1,
+				ptn->r, ptn->size_r);
+
+	/* Run engines */
+	lp5562_run_engine(chip, true);
+
+	return 0;
+}
+
+static ssize_t lp5562_store_wpattern(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t len)
+{
+	struct lp55xx_led *led = i2c_get_clientdata(to_i2c_client(dev));
+	struct lp55xx_chip *chip = led->chip;
+	struct lp55xx_predef_pattern *ptn = chip->pdata->wpatterns;
+	int num_patterns = chip->pdata->num_wpatterns;
+	unsigned long mode;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &mode);
+	if (ret)
+		return ret;
+
+	if (mode > num_patterns || !ptn)
+		return -EINVAL;
+
+	mutex_lock(&chip->lock);
+	ret = lp5562_run_predef_led_wpattern(chip, mode);
+	mutex_unlock(&chip->lock);
+
+	if (ret)
+		return ret;
+
+	return len;
+}
+
+static DEVICE_ATTR(wled_pattern, S_IWUSR, NULL, lp5562_store_wpattern);
+#endif /* CONFIG_ZYXEL_LEDS_LP5562_W_PRED_PAT */
+
 static DEVICE_ATTR(led_pattern, S_IWUSR, NULL, lp5562_store_pattern);
 static DEVICE_ATTR(engine_mux, S_IWUSR, NULL, lp5562_store_engine_mux);
 
 static struct attribute *lp5562_attributes[] = {
 	&dev_attr_led_pattern.attr,
 	&dev_attr_engine_mux.attr,
+#if defined(CONFIG_ZYXEL_LEDS_LP5562_W_PRED_PAT)
+	&dev_attr_wled_pattern.attr,
+#endif
 	NULL,
 };
 

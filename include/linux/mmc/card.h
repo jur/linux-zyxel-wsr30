@@ -249,6 +249,14 @@ struct mmc_card {
 #define MMC_CARD_REMOVED	(1<<7)		/* card has been removed */
 #define MMC_STATE_HIGHSPEED_200	(1<<8)		/* card is in HS200 mode */
 #define MMC_STATE_DOING_BKOPS	(1<<10)		/* card is doing BKOPS */
+/* liaokh *** */
+#define MMC_STATE_ONE_BLK	(1<<11)		/* writting use one block mode */
+#define MMC_STATE_IDENT_RDY	(1<<12)		/* for check identify state */
+#define MMC_STATE_CMD24_ERR	(1<<13)		/* for cmd24 error handling */
+#define MMC_STATE_CID_RDY	(1<<14)		/* read CID ready */
+#define MMC_STATE_CSD_RDY	(1<<15)		/* read CSD ready */
+
+/* liaokh &&& */
 	unsigned int		quirks; 	/* card quirks */
 #define MMC_QUIRK_LENIENT_FN0	(1<<0)		/* allow SDIO FN0 writes outside of the VS CCCR range */
 #define MMC_QUIRK_BLKSZ_FOR_BYTE_MODE (1<<1)	/* use func->cur_blksize */
@@ -416,6 +424,9 @@ static inline void __maybe_unused remove_quirk(struct mmc_card *card, int data)
 #define mmc_card_ext_capacity(c) ((c)->state & MMC_CARD_SDXC)
 #define mmc_card_removed(c)	((c) && ((c)->state & MMC_CARD_REMOVED))
 #define mmc_card_doing_bkops(c)	((c)->state & MMC_STATE_DOING_BKOPS)
+#define mmc_card_one_blk(c)	    ((c)->state & MMC_STATE_ONE_BLK)    //liao
+#define mmc_card_ident_rdy(c)	((c)->state & MMC_STATE_IDENT_RDY)  //liao
+#define mmc_card_cmd24_err(c)	((c)->state & MMC_STATE_CMD24_ERR)  //liao
 
 #define mmc_card_set_present(c)	((c)->state |= MMC_STATE_PRESENT)
 #define mmc_card_set_readonly(c) ((c)->state |= MMC_STATE_READONLY)
@@ -429,6 +440,9 @@ static inline void __maybe_unused remove_quirk(struct mmc_card *card, int data)
 #define mmc_card_set_removed(c) ((c)->state |= MMC_CARD_REMOVED)
 #define mmc_card_set_doing_bkops(c)	((c)->state |= MMC_STATE_DOING_BKOPS)
 #define mmc_card_clr_doing_bkops(c)	((c)->state &= ~MMC_STATE_DOING_BKOPS)
+#define mmc_card_set_one_blk(c)     ((c)->state |= MMC_STATE_ONE_BLK)   //liao
+#define mmc_card_set_ident_rdy(c)       ((c)->state |= MMC_STATE_IDENT_RDY) //liao
+#define mmc_card_set_cmd24_err(c)       ((c)->state |= MMC_STATE_CMD24_ERR)  //liao
 
 /*
  * Quirk add/remove for MMC products.

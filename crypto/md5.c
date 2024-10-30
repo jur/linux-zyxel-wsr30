@@ -49,6 +49,13 @@ static inline void md5_transform_helper(struct md5_state *ctx)
 
 static int md5_init(struct shash_desc *desc)
 {
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct md5_state *mctx = shash_desc_ctx(desc);
+	rtl_hash_init_ctx(crypto_shash_tfm(desc->tfm), &mctx->rtl_ctx);
+	mctx->byte_count = 0;
+	return 0;
+#else
+
 	struct md5_state *mctx = shash_desc_ctx(desc);
 
 	mctx->hash[0] = 0x67452301;
@@ -58,6 +65,7 @@ static int md5_init(struct shash_desc *desc)
 	mctx->byte_count = 0;
 
 	return 0;
+#endif
 }
 
 static int md5_update(struct shash_desc *desc, const u8 *data, unsigned int len)
@@ -70,12 +78,18 @@ static int md5_update(struct shash_desc *desc, const u8 *data, unsigned int len)
 	if (avail > len) {
 		memcpy((char *)mctx->block + (sizeof(mctx->block) - avail),
 		       data, len);
+		#ifdef CONFIG_CRYPTO_DEV_REALTEK
+		rtl_hash_update(&mctx->rtl_ctx, (u8 *) data, len);
+		#endif		
 		return 0;
 	}
 
 	memcpy((char *)mctx->block + (sizeof(mctx->block) - avail),
 	       data, avail);
-
+	#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	rtl_hash_update(&mctx->rtl_ctx, (u8 *) data, len);
+	return 0;
+	#endif
 	md5_transform_helper(mctx);
 	data += avail;
 	len -= avail;
@@ -92,8 +106,28 @@ static int md5_update(struct shash_desc *desc, const u8 *data, unsigned int len)
 	return 0;
 }
 
+#if 0//def CONFIG_CRYPTO_DEV_REALTEK
+static int md5_digest(struct shash_desc *desc, const u8 *data,
+	unsigned int len, u8 *out)
+{
+	struct md5_state *mctx = shash_desc_ctx(desc);
+	printk("%s %d \n", __FUNCTION__, __LINE__);
+	#if 1
+	mctx->rtl_ctx.mode = 0x00; //md5
+	return rtl_hash_digest(&mctx->rtl_ctx, (u8 *) data, len, out);
+	#else
+	return 0;
+	#endif
+}
+#endif
 static int md5_final(struct shash_desc *desc, u8 *out)
 {
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct md5_state *mctx = shash_desc_ctx(desc);
+	 rtl_hash_final(&mctx->rtl_ctx, out);
+	 memset(mctx, 0, sizeof(*mctx));
+	return 0;
+#else
 	struct md5_state *mctx = shash_desc_ctx(desc);
 	const unsigned int offset = mctx->byte_count & 0x3f;
 	char *p = (char *)mctx->block + offset;
@@ -118,6 +152,7 @@ static int md5_final(struct shash_desc *desc, u8 *out)
 	memset(mctx, 0, sizeof(*mctx));
 
 	return 0;
+#endif
 }
 
 static int md5_export(struct shash_desc *desc, void *out)
@@ -133,6 +168,11 @@ static int md5_import(struct shash_desc *desc, const void *in)
 	struct md5_state *ctx = shash_desc_ctx(desc);
 
 	memcpy(ctx, in, sizeof(*ctx));
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	ctx->rtl_ctx.length = 0;
+	rtl_hash_update(&ctx->rtl_ctx, (u8 *) ctx->block, ctx->byte_count);
+#endif
+
 	return 0;
 }
 
@@ -141,6 +181,9 @@ static struct shash_alg alg = {
 	.init		=	md5_init,
 	.update		=	md5_update,
 	.final		=	md5_final,
+#if 0//def CONFIG_CRYPTO_DEV_REALTEK
+	.digest		=	md5_digest,
+#endif
 	.export		=	md5_export,
 	.import		=	md5_import,
 	.descsize	=	sizeof(struct md5_state),

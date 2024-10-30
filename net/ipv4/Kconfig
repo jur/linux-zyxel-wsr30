@@ -55,6 +55,44 @@ config IP_ADVANCED_ROUTER
 
 	  If unsure, say N here.
 
+config RTL_IPTABLES_FAST_PATH
+        tristate "Realtek IPTables Fast Path"
+        default y
+
+config RTL_FAST_PPPOE
+        tristate "Realtek Fast PPPOE support"
+        default y
+
+config RTL_PPPOE_DIRECT_REPLY
+        tristate "Realtek Fast PPPOE LCP echo reply support"
+        default n
+
+
+config RTL_L2TP_DIRECT_PPP_REPLY
+        tristate "Realtek Fast L2TP LCP echo reply support"
+        default n
+	
+config FAST_PATH_SPI_ENABLED
+        bool "Realtek Fastpath SPI(stateful packet inspection) support"
+        depends on RTL_IPTABLES_FAST_PATH
+        default n
+
+config RTL_FASTBRIDGE
+        tristate "Realtek fast bridge"
+        default n
+
+config FP_BYPASS_PACKET
+	tristate "fast path support by pass packet"
+	default n
+
+#config RTL_FAST_IPV6
+#        tristate "Realtek FAST IPv6"
+#        default n
+
+config RTL_SUPPORT_ACCESS_PORT_FORWARD_FROM_LAN
+        tristate "Realtek support lan client access port forwarding port through wan_ip:fwd_port"
+        default y
+
 config IP_FIB_TRIE_STATS
 	bool "FIB TRIE statistics"
 	depends on IP_ADVANCED_ROUTER
@@ -80,6 +118,10 @@ config IP_MULTIPLE_TABLES
 	  <ftp://ftp.tux.org/pub/net/ip-routing/>.
 
 	  If unsure, say N.
+
+config RTL_IP_POLICY_ROUTING_SUPPORT
+	bool "rtl policy routing support"
+	depends on IP_MULTIPLE_TABLES
 
 config IP_ROUTE_MULTIPATH
 	bool "IP: equal cost multipath"

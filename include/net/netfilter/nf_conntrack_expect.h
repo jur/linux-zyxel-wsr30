@@ -79,6 +79,11 @@ struct nf_conntrack_expect *
 __nf_ct_expect_find(struct net *net, u16 zone,
 		    const struct nf_conntrack_tuple *tuple);
 
+#if defined(CONFIG_IP_NF_TARGET_CONENAT)
+struct nf_conntrack_expect *
+__nf_ct_expect_find_bysave(struct net *net, const struct nf_conntrack_tuple *tupleMake, const struct nf_conntrack_tuple *tuple);
+#endif
+
 struct nf_conntrack_expect *
 nf_ct_expect_find_get(struct net *net, u16 zone,
 		      const struct nf_conntrack_tuple *tuple);

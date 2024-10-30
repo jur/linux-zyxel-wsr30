@@ -127,6 +127,11 @@
 /* hardware time stamping: parameters in linux/net_tstamp.h */
 #define SIOCSHWTSTAMP   0x89b0
 
+#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
+#define SIOCSITFGROUP	0x89b6		/* set itfgroup, jiunming	*/
+#define SIOCSIFSMUX		0x89c1
+#endif
+
 /* Device private ioctl calls */
 
 /*

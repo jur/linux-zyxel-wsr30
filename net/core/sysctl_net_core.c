@@ -26,6 +26,11 @@ static int ushort_max = USHRT_MAX;
 static int min_sndbuf = SOCK_MIN_SNDBUF;
 static int min_rcvbuf = SOCK_MIN_RCVBUF;
 
+int	fastmesh_enable=0;
+EXPORT_SYMBOL(fastmesh_enable);
+int	show_fastmesh_msg=0;
+EXPORT_SYMBOL(show_fastmesh_msg);
+
 #ifdef CONFIG_RPS
 static int rps_sock_flow_sysctl(ctl_table *table, int write,
 				void __user *buffer, size_t *lenp, loff_t *ppos)
@@ -199,6 +204,21 @@ static struct ctl_table net_core_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
+
+	{
+		.procname	= "fastmesh_enable",
+		.data		= &fastmesh_enable,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "show_fastmesh_msg", 
+		.data		= &show_fastmesh_msg, 
+		.maxlen		= sizeof(int), 
+		.mode		= 0644, 
+		.proc_handler	= proc_dointvec
+	}, 
 	{ }
 };
 

@@ -52,18 +52,22 @@ static int lp55xx_detect_device(struct lp55xx_chip *chip)
 	u8 val  = cfg->enable.val;
 	int ret;
 
+#if !defined(CONFIG_LEDS_LP55XX_COMMON_DISABLE_RESET_AND_ENABLE)
 	ret = lp55xx_write(chip, addr, val);
 	if (ret)
 		return ret;
 
 	usleep_range(1000, 2000);
+#endif
 
 	ret = lp55xx_read(chip, addr, &val);
 	if (ret)
 		return ret;
 
+#if !defined(CONFIG_LEDS_LP55XX_COMMON_DISABLE_RESET_AND_ENABLE)
 	if (val != cfg->enable.val)
 		return -ENODEV;
+#endif
 
 	return 0;
 }
@@ -164,6 +168,7 @@ static int lp55xx_init_led(struct lp55xx_led *led,
 	led->led_current = pdata->led_config[chan].led_current;
 	led->max_current = pdata->led_config[chan].max_current;
 	led->chan_nr = pdata->led_config[chan].chan_nr;
+	led->cdev.default_trigger = pdata->led_config[chan].default_trigger;
 
 	if (led->chan_nr >= max_channel) {
 		dev_err(dev, "Use channel numbers between 0 and %d\n",
@@ -420,7 +425,9 @@ int lp55xx_init_device(struct lp55xx_chip *chip)
 		usleep_range(1000, 2000); /* 500us abs min. */
 	}
 
+#if !defined(CONFIG_LEDS_LP55XX_COMMON_DISABLE_RESET_AND_ENABLE)
 	lp55xx_reset_device(chip);
+#endif
 
 	/*
 	 * Exact value is not available. 10 - 20ms

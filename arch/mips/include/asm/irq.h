@@ -124,7 +124,7 @@ extern void do_IRQ_no_affinity(unsigned int irq);
 
 #endif /* CONFIG_MIPS_MT_SMTC_IRQAFF */
 
-extern void arch_init_irq(void);
+extern void bsp_irq_init(void);
 extern void spurious_interrupt(void);
 
 extern int allocate_irqno(void);

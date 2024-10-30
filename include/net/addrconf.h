@@ -22,6 +22,29 @@
 #include <linux/in.h>
 #include <linux/in6.h>
 
+
+#ifdef	CONFIG_IPV6_RA_RDNSS_SUPPORT 
+#define IPV6_RDNSS_MAX  3
+struct rdnss_info {
+ __u8	 type;
+ __u8	 length;
+ __be16	 reserved;
+ __be32	 lifetime;
+ struct in6_addr in6addr_dns[IPV6_RDNSS_MAX];
+};
+#ifdef  CONFIG_IPV6_RA_DNSSL_SUPPORT 
+#define IPV6_DNSSL_MAX  3
+struct dnssl_info {
+ __u8    type;
+ __u8    length;
+ __be16  reserved;
+ __be32  lifetime;
+ char name_dsl[IPV6_DNSSL_MAX][128];
+};
+#endif
+#endif
+
+
 struct prefix_info {
 	__u8			type;
 	__u8			length;

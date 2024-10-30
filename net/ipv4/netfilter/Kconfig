@@ -156,6 +156,23 @@ config IP_NF_TARGET_MASQUERADE
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
+config IP_NF_TARGET_CONENAT
+        tristate "CONENAT target support"
+        depends on NF_NAT
+        depends on IP_NF_TARGET_MASQUERADE
+        default m if NETFILTER_ADVANCED=n
+        help
+          It is a FULL CONE NAT(see RFC 3489), you can use it instead of MASQUERADE.
+
+          To compile it as a module, choose M here.  If unsure, say N.
+
+config IP_NF_TARGET_TRIGGER
+        tristate "TRIGGER port target support"
+        depends on NF_NAT
+        default m if NETFILTER_ADVANCED=n
+        help
+          To compile it as a module, choose M here.  If unsure, say N.
+
 config IP_NF_TARGET_NETMAP
 	tristate "NETMAP target support"
 	depends on NETFILTER_ADVANCED

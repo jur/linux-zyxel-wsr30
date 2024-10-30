@@ -3,6 +3,15 @@
 
 #include <linux/types.h>
 
+#ifndef CONFIG_RTL_819X
+#define CONFIG_RTL_819X
+#endif
+ 
+#if defined(CONFIG_RTL_819X)
+#define __kernel_long_t         long
+#define __kernel_ulong_t        unsigned long
+#endif
+
 #define SI_LOAD_SHIFT	16
 struct sysinfo {
 	__kernel_long_t uptime;		/* Seconds since boot */

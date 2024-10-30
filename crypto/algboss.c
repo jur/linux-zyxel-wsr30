@@ -217,7 +217,9 @@ static int cryptomgr_test(void *data)
 #ifdef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
 	goto skiptest;
 #endif
-
+#if defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
+	goto skiptest;
+#endif
 	if (type & CRYPTO_ALG_TESTED)
 		goto skiptest;
 

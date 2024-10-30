@@ -19,8 +19,26 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+#include "../drivers/crypto/realtek/rtl_crypto_helper.h"
+
+#define AES_MAX_KEY_SIZE	32
+#define DES_KEY_SIZE		8
+#define DES3_EDE_KEY_SIZE	(3 * DES_KEY_SIZE)
+
+#define CBC_3DES_NAME		"cbc(des3_ede)"
+#define CBC_DES_NAME		"cbc(des)"
+#define CBC_AES_NAME		"cbc(aes)"
+
+extern int rtl_des3_ede_get_cbckey(struct crypto_tfm *tfm, const u8 *key,unsigned int keylen);
+extern int rtl_aes_get_key(struct crypto_tfm *tfm, const u8 *key, u32 *keylen);
+extern int rtl_des_get_cbckey(struct crypto_tfm *tfm, const u8 *key, unsigned int keylen);
+#endif // CONFIG_CRYPTO_DEV_REALTEK
 struct crypto_cbc_ctx {
 	struct crypto_cipher *child;
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct rtl_cipher_ctx rtl_ctx;
+#endif
 };
 
 static int crypto_cbc_setkey(struct crypto_tfm *parent, const u8 *key,
@@ -36,6 +54,11 @@ static int crypto_cbc_setkey(struct crypto_tfm *parent, const u8 *key,
 	err = crypto_cipher_setkey(child, key, keylen);
 	crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
 				     CRYPTO_TFM_RES_MASK);
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	if (err == 0)
+		err = rtl_cipher_setkey(child, &ctx->rtl_ctx, key, keylen);
+#endif
+
 	return err;
 }
 
@@ -97,10 +120,67 @@ static int crypto_cbc_encrypt(struct blkcipher_desc *desc,
 	struct crypto_cipher *child = ctx->child;
 	int err;
 
+#if defined(CONFIG_CRYPTO_DEV_REALTEK)	
+	struct rtl_cipher_ctx *rtl_tmp_ctx = &ctx->rtl_ctx;	
+	const char *algname = crypto_tfm_alg_name(tfm);
+	u8	aes_cbc_key[AES_MAX_KEY_SIZE] = {0};
+	u32 keylen = 0;
+	
+	if (algname){
+		//printk("%s %d algname=%s tfm=0x%p\n", __FUNCTION__, __LINE__, algname, tfm);
+		if (memcmp(algname, CBC_3DES_NAME, strlen(CBC_3DES_NAME)) == 0){
+			rtl_des3_ede_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES3_EDE_KEY_SIZE);
+		}
+		else if (memcmp(algname, CBC_DES_NAME, strlen(CBC_DES_NAME)) == 0){
+			rtl_des_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES_KEY_SIZE);
+		}
+		else if (memcmp(algname, CBC_AES_NAME, strlen(CBC_AES_NAME)) == 0){
+			err = rtl_aes_get_key((struct crypto_tfm *)child, aes_cbc_key, &keylen);
+			if (err == 0){
+				rtl_cipher_setkey(child, &ctx->rtl_ctx, aes_cbc_key, keylen);
+			}
+		}
+	}
+#endif
+
 	blkcipher_walk_init(&walk, dst, src, nbytes);
 	err = blkcipher_walk_virt(desc, &walk);
 
 	while ((nbytes = walk.nbytes)) {
+#ifdef CONFIG_CRYPTO_DEV_REALTEK_DBG
+		printk("%s: total=%d, walk=%d, blk=%d, src=%p, dst=%p\n", __FUNCTION__,
+			walk.total, walk.nbytes, crypto_cipher_blocksize(child),
+			walk.src.virt.addr, walk.dst.virt.addr
+		);
+#endif
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+		if (ctx->rtl_ctx.mode >= 0)
+		{
+			int bsize = crypto_cipher_blocksize(child);
+			nbytes = rtl_cipher_crypt(child, 1,
+				&ctx->rtl_ctx, walk.src.virt.addr, nbytes,
+				walk.iv, walk.dst.virt.addr);
+
+			// cbc mode update
+			//memcpy(walk.iv, walk.dst.virt.addr,
+				//crypto_cipher_blocksize(child));
+			
+			if (walk.src.virt.addr == walk.dst.virt.addr)
+			{
+				walk.src.virt.addr += (walk.nbytes - nbytes);
+				memcpy(walk.iv, walk.src.virt.addr - bsize ,bsize);
+			}
+			else
+			{
+				walk.src.virt.addr += (walk.nbytes - nbytes);
+				walk.dst.virt.addr += (walk.nbytes - nbytes);
+				memcpy(walk.iv, walk.dst.virt.addr - bsize ,bsize);
+			}
+			//printk("%s %d (walk.nbytes - nbytes)=%d \n", __FUNCTION__, __LINE__, (walk.nbytes - nbytes));
+			err = blkcipher_walk_done(desc, &walk, nbytes);
+			continue;
+		}
+#endif
 		if (walk.src.virt.addr == walk.dst.virt.addr)
 			nbytes = crypto_cbc_encrypt_inplace(desc, &walk, child);
 		else
@@ -175,11 +255,71 @@ static int crypto_cbc_decrypt(struct blkcipher_desc *desc,
 	struct crypto_cbc_ctx *ctx = crypto_blkcipher_ctx(tfm);
 	struct crypto_cipher *child = ctx->child;
 	int err;
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)	
+	struct rtl_cipher_ctx *rtl_tmp_ctx = &ctx->rtl_ctx;
+	const char *algname = crypto_tfm_alg_name(tfm);
+	u8	aes_cbc_key[AES_MAX_KEY_SIZE] = {0};
+	u32 keylen = 0;
+	
+	if (algname){
+		//printk("%s %d algname=%s tfm=0x%p\n", __FUNCTION__, __LINE__, algname, tfm);
+		if (memcmp(algname, CBC_3DES_NAME, strlen(CBC_3DES_NAME)) == 0){
+			rtl_des3_ede_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES3_EDE_KEY_SIZE);
+		}
+		else if (memcmp(algname, CBC_DES_NAME, strlen(CBC_DES_NAME)) == 0){
+			rtl_des_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES_KEY_SIZE);
+		}
+		else if (memcmp(algname, CBC_AES_NAME, strlen(CBC_AES_NAME)) == 0){
+			err = rtl_aes_get_key((struct crypto_tfm *)child, aes_cbc_key, &keylen);
+			if (err == 0){
+				rtl_cipher_setkey(child, &ctx->rtl_ctx, aes_cbc_key, keylen);
+			}
+		}
+	}
+	#endif
 
 	blkcipher_walk_init(&walk, dst, src, nbytes);
 	err = blkcipher_walk_virt(desc, &walk);
 
 	while ((nbytes = walk.nbytes)) {
+#ifdef CONFIG_CRYPTO_DEV_REALTEK_DBG
+		printk("%s %d: total=%d, walk=%d, blk=%d, src=%p, dst=%p ctx->rtl_ctx.mode=%d \n", __FUNCTION__,__LINE__,
+			walk.total, walk.nbytes, crypto_cipher_blocksize(child),
+			walk.src.virt.addr, walk.dst.virt.addr, ctx->rtl_ctx.mode
+		);
+#endif
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+		if (ctx->rtl_ctx.mode >= 0)
+		{
+			int bsize = crypto_cipher_blocksize(child);
+			int offset = 0;
+			u8 last_iv[bsize];
+			if (walk.src.virt.addr == walk.dst.virt.addr)
+			{
+				
+				offset = (nbytes - (nbytes & (bsize - 1)) - bsize);
+				memcpy(last_iv, walk.src.virt.addr + offset, bsize);
+			}
+			nbytes = rtl_cipher_crypt(child, 0,
+				&ctx->rtl_ctx, walk.src.virt.addr, nbytes,
+				walk.iv, walk.dst.virt.addr);
+			
+			// cbc mode update			
+			if (walk.src.virt.addr == walk.dst.virt.addr)
+			{
+				walk.src.virt.addr += (walk.nbytes - nbytes);	
+				memcpy(walk.iv, last_iv, bsize);
+			}
+			else
+			{
+				walk.src.virt.addr += (walk.nbytes - nbytes);
+				walk.dst.virt.addr += (walk.nbytes - nbytes);
+				memcpy(walk.iv, walk.src.virt.addr - bsize, bsize);
+			}
+			err = blkcipher_walk_done(desc, &walk, nbytes);
+			continue;
+		}
+#endif
 		if (walk.src.virt.addr == walk.dst.virt.addr)
 			nbytes = crypto_cbc_decrypt_inplace(desc, &walk, child);
 		else
@@ -202,6 +342,9 @@ static int crypto_cbc_init_tfm(struct crypto_tfm *tfm)
 		return PTR_ERR(cipher);
 
 	ctx->child = cipher;
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	rtl_cipher_init_ctx(tfm, &ctx->rtl_ctx);
+#endif
 	return 0;
 }
 

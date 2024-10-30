@@ -57,6 +57,26 @@
 #define GICH_MISR_EOI			(1 << 0)
 #define GICH_MISR_U			(1 << 1)
 
+#define GIC_IRQ_BASE			0
+#define GIC_IRQ_OFS			27
+
+/* armv7a generic PPI */
+#define GIC_IRQ_LFIQ			28
+#define GIC_IRQ_LIRQ			31
+
+/* cortex-a9 timer PPI */
+#define GIC_IRQ_GTIMER			27
+#define GIC_IRQ_PTIMER			29
+#define GIC_IRQ_WDTIMER			30
+
+/* cortex-a7 timer PPI */
+#define GIC_IRQ_HYP_TIMER		26
+#define GIC_IRQ_VIRT_TIMER		27
+#define GIC_IRQ_PHYS_NSTIMER		29
+#define GIC_IRQ_PHYS_STIMER		30
+
+#define GIC_IRQ_SPI(n)			(32+(n))
+
 #ifndef __ASSEMBLY__
 
 struct device_node;
@@ -66,6 +86,7 @@ extern struct irq_chip gic_arch_extn;
 void gic_init_bases(unsigned int, int, void __iomem *, void __iomem *,
 		    u32 offset, struct device_node *);
 void gic_cascade_irq(unsigned int gic_nr, unsigned int irq);
+void gic_raise_softirq(const struct cpumask *mask, unsigned int irq);
 
 static inline void gic_init(unsigned int nr, int start,
 			    void __iomem *dist , void __iomem *cpu)

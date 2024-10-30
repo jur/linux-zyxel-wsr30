@@ -9,8 +9,6 @@
 #ifndef _ASM_WAR_H
 #define _ASM_WAR_H
 
-#include <war.h>
-
 /*
  * Work around certain R4000 CPU errata (as implemented by GCC):
  *
@@ -79,7 +77,7 @@
  * with the issue.
  */
 #ifndef R4600_V1_INDEX_ICACHEOP_WAR
-#error Check setting of R4600_V1_INDEX_ICACHEOP_WAR for your platform
+#define R4600_V1_INDEX_ICACHEOP_WAR 0
 #endif
 
 /*
@@ -109,7 +107,7 @@
  *				cache	    Hit_Writeback_Invalidate_D
  */
 #ifndef R4600_V1_HIT_CACHEOP_WAR
-#error Check setting of R4600_V1_HIT_CACHEOP_WAR for your platform
+#define R4600_V1_HIT_CACHEOP_WAR 0
 #endif
 
 
@@ -125,7 +123,7 @@
  * in .pdf format.)
  */
 #ifndef R4600_V2_HIT_CACHEOP_WAR
-#error Check setting of R4600_V2_HIT_CACHEOP_WAR for your platform
+#define R4600_V2_HIT_CACHEOP_WAR 0
 #endif
 
 /*
@@ -138,7 +136,7 @@
  * pre-conditions for this problem.
  */
 #ifndef R5432_CP0_INTERRUPT_WAR
-#error Check setting of R5432_CP0_INTERRUPT_WAR for your platform
+#define R5432_CP0_INTERRUPT_WAR 0
 #endif
 
 /*
@@ -152,14 +150,14 @@
  * found to be inconsistent.
  */
 #ifndef BCM1250_M3_WAR
-#error Check setting of BCM1250_M3_WAR for your platform
+#define BCM1250_M3_WAR 0
 #endif
 
 /*
  * This is a DUART workaround related to glitches around register accesses
  */
 #ifndef SIBYTE_1956_WAR
-#error Check setting of SIBYTE_1956_WAR for your platform
+#define SIBYTE_1956_WAR 0
 #endif
 
 /*
@@ -175,7 +173,7 @@
  *  MIPS 4K		RTL revision <3.0, PRID revision <4
  */
 #ifndef MIPS4K_ICACHE_REFILL_WAR
-#error Check setting of MIPS4K_ICACHE_REFILL_WAR for your platform
+#define MIPS4K_ICACHE_REFILL_WAR 0
 #endif
 
 /*
@@ -194,7 +192,7 @@
  *   MIPS 20Kc		RTL revision <4.0, PRID revision <?
  */
 #ifndef MIPS_CACHE_SYNC_WAR
-#error Check setting of MIPS_CACHE_SYNC_WAR for your platform
+#define MIPS_CACHE_SYNC_WAR 0
 #endif
 
 /*
@@ -205,7 +203,7 @@
  * Workaround: do two phase flushing for Index_Invalidate_I
  */
 #ifndef TX49XX_ICACHE_INDEX_INV_WAR
-#error Check setting of TX49XX_ICACHE_INDEX_INV_WAR for your platform
+#define TX49XX_ICACHE_INDEX_INV_WAR 0
 #endif
 
 /*
@@ -215,7 +213,7 @@
  * exceptions.
  */
 #ifndef ICACHE_REFILLS_WORKAROUND_WAR
-#error Check setting of ICACHE_REFILLS_WORKAROUND_WAR for your platform
+#define ICACHE_REFILLS_WORKAROUND_WAR 0
 #endif
 
 /*
@@ -223,14 +221,14 @@
  * may cause ll / sc and lld / scd sequences to execute non-atomically.
  */
 #ifndef R10000_LLSC_WAR
-#error Check setting of R10000_LLSC_WAR for your platform
+#define R10000_LLSC_WAR 0
 #endif
 
 /*
  * 34K core erratum: "Problems Executing the TLBR Instruction"
  */
 #ifndef MIPS34K_MISSED_ITLB_WAR
-#error Check setting of MIPS34K_MISSED_ITLB_WAR for your platform
+#define MIPS34K_MISSED_ITLB_WAR 0
 #endif
 
 #endif /* _ASM_WAR_H */

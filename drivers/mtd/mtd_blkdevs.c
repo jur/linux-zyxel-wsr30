@@ -33,9 +33,13 @@
 #include <linux/init.h>
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+
+#include <linux/rcupdate.h>
 
 #include "mtdcore.h"
-
+//#define RTK_FLASH_SPIN_LOCK 1
 static LIST_HEAD(blktrans_majors);
 static DEFINE_MUTEX(blktrans_ref_mutex);
 
@@ -102,12 +106,16 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 			if (tr->readsect(dev, block, buf))
 				return -EIO;
 		rq_flush_dcache_pages(req);
+		__flush_cache_all();
+
 		return 0;
 	case WRITE:
 		if (!tr->writesect)
 			return -EIO;
 
 		rq_flush_dcache_pages(req);
+
+		__flush_cache_all();
 		for (; nsect > 0; nsect--, block++, buf += tr->blksize)
 			if (tr->writesect(dev, block, buf))
 				return -EIO;
@@ -120,60 +128,203 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 
 int mtd_blktrans_cease_background(struct mtd_blktrans_dev *dev)
 {
-	return dev->bg_stop;
+	if (kthread_should_stop())
+		return 1;
+
+	//return dev->bg_stop;
 }
 EXPORT_SYMBOL_GPL(mtd_blktrans_cease_background);
+extern spinlock_t lock_spi;
+#define MAX_RT_PRIO 70
+static int mtd_blktrans_thread(void *arg)
 
-static void mtd_blktrans_work(struct work_struct *work)
+//static void mtd_blktrans_work(struct work_struct *work)
 {
-	struct mtd_blktrans_dev *dev =
-		container_of(work, struct mtd_blktrans_dev, work);
+	struct mtd_blktrans_dev *dev = arg;
+	//struct mtd_blktrans_dev *dev =
+		//container_of(work, struct mtd_blktrans_dev, work);
 	struct mtd_blktrans_ops *tr = dev->tr;
 	struct request_queue *rq = dev->rq;
 	struct request *req = NULL;
 	int background_done = 0;
+	int count=0;
+	unsigned long flag=0;
+	struct task_struct *TSK; 
+	 struct sched_param PARAM = {.sched_priority = MAX_RT_PRIO }; 
+	 TSK = current; 
 
+	 
+	 PARAM.sched_priority = 55; 
+	 sched_setscheduler(TSK, SCHED_FIFO, &PARAM); // <-- unknown symbol?? 
+
+
+	
 	spin_lock_irq(rq->queue_lock);
 
-	while (1) {
+
+	while (!kthread_should_stop()) {
 		int res;
 
 		dev->bg_stop = false;
-		if (!req && !(req = blk_fetch_request(rq))) {
-			if (tr->background && !background_done) {
-				spin_unlock_irq(rq->queue_lock);
+		if (!req && !(req = blk_fetch_request(rq)) ) {
+			if (tr->background && !background_done) {				
+			//if ( !background_done) {
+				spin_unlock_irqrestore(rq->queue_lock,flag);
 				mutex_lock(&dev->lock);
 				tr->background(dev);
 				mutex_unlock(&dev->lock);
-				spin_lock_irq(rq->queue_lock);
+				spin_lock_irqsave(rq->queue_lock,flag);	
 				/*
 				 * Do background processing just once per idle
 				 * period.
 				 */
 				background_done = !dev->bg_stop;
+
+	 #if 1
+                 __asm__ __volatile__(  \
+                ".set   push\n\t"       \
+                ".set   noreorder\n\t"  \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+		 "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                ".set   pop\n\t");
+                #endif
+
+	cond_resched();
+ #if 1
+                 __asm__ __volatile__(  \
+                ".set   push\n\t"       \
+                ".set   noreorder\n\t"  \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                 "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                ".set   pop\n\t");
+                #endif
+
+
+
 				continue;
 			}
-			break;
+			
+			set_current_state(TASK_INTERRUPTIBLE);
+
+			if (kthread_should_stop())
+				set_current_state(TASK_RUNNING);
+
+			spin_unlock_irqrestore(rq->queue_lock,flag);
+	
+ #if 1
+                 __asm__ __volatile__(  \
+                ".set   push\n\t"       \
+                ".set   noreorder\n\t"  \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                 "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                ".set   pop\n\t");
+                #endif
+
+
+
+	
+			schedule();
+	 #if 1
+                 __asm__ __volatile__(  \
+                ".set   push\n\t"       \
+                ".set   noreorder\n\t"  \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+		 "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                "nop\n\t"               \
+                ".set   pop\n\t");
+                #endif
+
+			spin_lock_irqsave(rq->queue_lock,flag);
+			continue;
+			//break;
 		}
 
-		spin_unlock_irq(rq->queue_lock);
+		//spin_unlock_irq(rq->queue_lock);
+		spin_unlock_irqrestore(rq->queue_lock,flag);
 
 		mutex_lock(&dev->lock);
 		res = do_blktrans_request(dev->tr, dev, req);
 		mutex_unlock(&dev->lock);
 
-		spin_lock_irq(rq->queue_lock);
+		//spin_lock_irq(rq->queue_lock);
+		spin_lock_irqsave(rq->queue_lock,flag);
 
 		if (!__blk_end_request_cur(req, res))
 			req = NULL;
 
 		background_done = 0;
+		
 	}
 
 	if (req)
 		__blk_end_request_all(req, -EIO);
 
-	spin_unlock_irq(rq->queue_lock);
+	//spin_unlock_irq(rq->queue_lock);
+	spin_unlock_irqrestore(rq->queue_lock,flag);
+		
 }
 
 static void mtd_blktrans_request(struct request_queue *rq)
@@ -186,8 +337,12 @@ static void mtd_blktrans_request(struct request_queue *rq)
 	if (!dev)
 		while ((req = blk_fetch_request(rq)) != NULL)
 			__blk_end_request_all(req, -ENODEV);
-	else
-		queue_work(dev->wq, &dev->work);
+		else {
+		dev->bg_stop = true;
+		wake_up_process(dev->thread);
+	}
+	//else
+		//queue_work(dev->wq, &dev->work);
 }
 
 static int blktrans_open(struct block_device *bdev, fmode_t mode)
@@ -425,13 +580,27 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 	}
 
 	gd->queue = new->rq;
-
+#if 0
 	/* Create processing workqueue */
 	new->wq = alloc_workqueue("%s%d", 0, 0,
 				  tr->name, new->mtd->index);
 	if (!new->wq)
 		goto error4;
-	INIT_WORK(&new->work, mtd_blktrans_work);
+
+#endif
+
+
+		/* Create processing thread */
+		/* TODO: workqueue ? */
+		new->thread = kthread_run(mtd_blktrans_thread, new,
+				"%s%d", tr->name, new->mtd->index);
+		if (IS_ERR(new->thread)) {
+			ret = PTR_ERR(new->thread);
+			}
+//		kthread_bind(new->thread,1);
+		
+		//kthread_bind(new->thread,0);
+//	INIT_WORK(&new->work, mtd_blktrans_work);
 
 	gd->driverfs_dev = &new->mtd->dev;
 
@@ -472,9 +641,12 @@ int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 	/* Stop new requests to arrive */
 	del_gendisk(old->disk);
 
+	/* Stop the thread */
+	kthread_stop(old->thread);
+#if 0
 	/* Stop workqueue. This will perform any pending request. */
 	destroy_workqueue(old->wq);
-
+#endif
 	/* Kill current requests */
 	spin_lock_irqsave(&old->queue_lock, flags);
 	old->rq->queuedata = NULL;

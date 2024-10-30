@@ -71,6 +71,10 @@
 #define CONFIG_IP_PIMSM	1
 #endif
 
+#if	defined (CONFIG_RTL_IGMP_PROXY)
+static int ipmr_find_vif(struct mr_table *mrt, struct net_device *dev);
+#endif
+
 struct mr_table {
 	struct list_head	list;
 #ifdef CONFIG_NET_NS
@@ -552,8 +556,15 @@ static int vif_delete(struct mr_table *mrt, int vifi, int notify,
 	struct net_device *dev;
 	struct in_device *in_dev;
 
+#if defined(CONFIG_RTL_IGMP_PROXY_MULTIWAN)
+	if(vifi < 0 || vifi >= MAXVIFS)
+		return -EADDRNOTAVAIL;
+	if(vifi >= mrt->maxvif)
+		return 0;
+#else
 	if (vifi < 0 || vifi >= mrt->maxvif)
 		return -EADDRNOTAVAIL;
+#endif
 
 	v = &mrt->vif_table[vifi];
 
@@ -563,7 +574,12 @@ static int vif_delete(struct mr_table *mrt, int vifi, int notify,
 
 	if (!dev) {
 		write_unlock_bh(&mrt_lock);
+#if defined(CONFIG_RTL_IGMP_PROXY_MULTIWAN)
+		//vif not exist
+		return 0;
+#else
 		return -EADDRNOTAVAIL;
+#endif
 	}
 
 #ifdef CONFIG_IP_PIMSM
@@ -719,7 +735,11 @@ static int vif_add(struct net *net, struct mr_table *mrt,
 
 	/* Is vif busy ? */
 	if (VIF_EXISTS(mrt, vifi))
+#if defined(CONFIG_RTL_IGMP_PROXY_MULTIWAN)
+		return 0;
+#else
 		return -EADDRINUSE;
+#endif
 
 	switch (vifc->vifc_flags) {
 #ifdef CONFIG_IP_PIMSM
@@ -873,6 +893,60 @@ static struct mfc_cache *ipmr_cache_find_any(struct mr_table *mrt,
 skip:
 	return ipmr_cache_find_any_parent(mrt, vifi);
 }
+
+#if defined(CONFIG_BRIDGE_IGMP_SNOOPING)||defined(CONFIG_RTL_IGMP_SNOOPING)
+#if	defined (CONFIG_RTL_IGMP_PROXY)
+int rtl865x_checkMfcCache(struct net *net,struct net_device *dev,__be32 origin,__be32 mcastgrp)
+{
+	struct mfc_cache *mfc=NULL;
+	int vif_index;
+	#if defined (CONFIG_RTL_IGMP_PROXY_MULTIWAN)
+	int i;
+	#endif
+	__be32 origin_temp=0;
+
+	struct mr_table *mrt=ipmr_get_table(net, mcastgrp);
+
+	#if defined (CONFIG_RTL_IGMP_PROXY_MULTIWAN)
+	for(i=0; i<MAXVIFS; i++)
+	{
+		if(mrt->vif_table[i].dev && dev && strcmp(mrt->vif_table[i].dev->name, dev->name)==0)
+			break;
+	}
+	/*this interface is not add to vif yet*/
+	if(i==MAXVIFS)
+	{
+		return -1;
+	}
+	#endif
+	
+	mfc=ipmr_cache_find(mrt,origin,mcastgrp);
+	if(mfc==NULL)
+	{
+		vif_index = ipmr_find_vif(mrt,dev);
+		origin_temp = htonl(vif_index);
+		mfc = ipmr_cache_find(mrt, origin_temp, mcastgrp);
+	}
+	
+	if(mfc!=NULL)
+	{
+		return 0;
+	}
+	else
+	{
+		struct mfc_cache *c;
+		list_for_each_entry(c, &mrt->mfc_unres_queue, list) 
+		{
+			if (c->mfc_mcastgrp == mcastgrp) 
+			{
+				return 0;
+			}
+		}
+	}
+	return -1;
+}
+#endif
+#endif/*CONFIG_RTL_IGMP_PROXY or CONFIG_BRIDGE_IGMP_SNOOPING*/
 
 /*
  *	Allocate a multicast cache entry
@@ -1952,6 +2026,13 @@ int ip_mr_input(struct sk_buff *skb)
 	int local = skb_rtable(skb)->rt_flags & RTCF_LOCAL;
 	struct mr_table *mrt;
 
+#if defined (CONFIG_RTL_IGMP_PROXY)
+	struct net_device *dev=skb->dev;
+	int vif_index;
+	__be32 origin_temp=0;
+	cache=NULL;
+#endif
+
 	/* Packet is looped back after forward, it should not be
 	 * forwarded second time, but still can be delivered locally.
 	 */
@@ -1984,9 +2065,17 @@ int ip_mr_input(struct sk_buff *skb)
 			}
 		    }
 	}
-
+#if defined (CONFIG_RTL_IGMP_PROXY)
+	vif_index=ipmr_find_vif(mrt,dev);
+	origin_temp = htonl(vif_index);
+	cache = ipmr_cache_find(mrt, origin_temp, ip_hdr(skb)->daddr);
+	if (cache==NULL){
+		cache = ipmr_cache_find(mrt, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
+	}
+#else
 	/* already under rcu_read_lock() */
 	cache = ipmr_cache_find(mrt, ip_hdr(skb)->saddr, ip_hdr(skb)->daddr);
+#endif
 	if (cache == NULL) {
 		int vif = ipmr_find_vif(mrt, skb->dev);
 
@@ -1994,7 +2083,18 @@ int ip_mr_input(struct sk_buff *skb)
 			cache = ipmr_cache_find_any(mrt, ip_hdr(skb)->daddr,
 						    vif);
 	}
-
+	#if 0
+	if(cache == NULL)
+	{
+		if(net_ratelimit())
+			printk("cache not found![%s:%d]\n",__FUNCTION__,__LINE__);
+	}
+	else
+	{
+		if(net_ratelimit())
+			printk("cache found![%s:%d]\n",__FUNCTION__,__LINE__);
+	}
+	#endif
 	/*
 	 *	No usable cache entry
 	 */

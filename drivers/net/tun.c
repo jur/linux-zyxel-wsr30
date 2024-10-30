@@ -704,6 +704,9 @@ static int tun_net_close(struct net_device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+extern int openvpn_fast_to_wan(struct sk_buff *skb);
+#endif
 /* Net device start xmit */
 static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 {
@@ -731,6 +734,15 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (tfile->socket.sk->sk_filter &&
 	    sk_filter(tfile->socket.sk, skb))
 		goto drop;
+	#ifdef CONFIG_RTK_OPENVPN_HW_CRYPTO
+	//vpn_shared_info.tun_dev=(void *)(skb->dev);
+	//if((*((unsigned short*)(skb->data+6)) & 0x3fff)==0 && openvpn_fast_to_wan(skb)==1)
+	if(openvpn_fast_to_wan(skb)==1)
+	{
+		//printk("\n%s:%d#####NETDEV_TX_OK!!!\n",__FUNCTION__,__LINE__);
+		return NETDEV_TX_OK;
+	}	
+	#endif
 
 	/* Limit the number of packets queued by dividing txq length with the
 	 * number of queues.

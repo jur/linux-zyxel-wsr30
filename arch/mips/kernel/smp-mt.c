@@ -71,6 +71,7 @@ static unsigned int __init smvp_vpe_init(unsigned int tc, unsigned int mvpconf0,
 
 		/* Record this as available CPU */
 		set_cpu_possible(tc, true);
+		 set_cpu_present(tc, true); 
 		__cpu_number_map[tc]	= ++ncpu;
 		__cpu_logical_map[ncpu] = tc;
 	}
@@ -112,11 +113,35 @@ static void __init smvp_tc_init(unsigned int tc, unsigned int mvpconf0)
 	write_tc_c0_tchalt(TCHALT_H);
 }
 
+
+static void mp_send_ipi_single(int cpu, unsigned int action) 
+{ 
+ 		        unsigned long flags; 
+ 		 
+ 		        local_irq_save(flags); 
+ 		 
+ 		        switch (action) { 
+ 		        case SMP_CALL_FUNCTION: 
+ 		                gic_send_ipi(plat_ipi_call_int_xlate(cpu)); 
+ 		                break; 
+ 		 
+ 		        case SMP_RESCHEDULE_YOURSELF: 
+ 		                gic_send_ipi(plat_ipi_resched_int_xlate(cpu)); 
+ 		                break; 
+ 		        } 
+ 		 
+ 		        local_irq_restore(flags); 
+ } 
+
 static void vsmp_send_ipi_single(int cpu, unsigned int action)
 {
 	int i;
 	unsigned long flags;
 	int vpflags;
+ if (gic_present) { 
+ 		                mp_send_ipi_single(cpu, action); 
+ 		                return; 
+ 	        } 
 
 	local_irq_save(flags);
 
@@ -151,15 +176,10 @@ static void vsmp_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 
 static void __cpuinit vsmp_init_secondary(void)
 {
-#ifdef CONFIG_IRQ_GIC
-	/* This is Malta specific: IPI,performance and timer interrupts */
-	if (gic_present)
-		change_c0_status(ST0_IM, STATUSF_IP3 | STATUSF_IP4 |
-					 STATUSF_IP6 | STATUSF_IP7);
-	else
-#endif
-		change_c0_status(ST0_IM, STATUSF_IP0 | STATUSF_IP1 |
-					 STATUSF_IP6 | STATUSF_IP7);
+	extern void bsp_smp_init_secondary(void);
+
+	/* Call bsp init_secondary hook */
+	bsp_smp_init_secondary();
 }
 
 static void __cpuinit vsmp_smp_finish(void)
@@ -258,7 +278,9 @@ static void __init vsmp_smp_setup(void)
 	for (tc = 0; tc <= ntc; tc++) {
 		settc(tc);
 
+
 		smvp_tc_init(tc, mvpconf0);
+		
 		ncpu = smvp_vpe_init(tc, mvpconf0, ncpu);
 	}
 

@@ -49,6 +49,7 @@
 	cpu_save_nonscratch a0
 	LONG_S	ra, THREAD_REG31(a0)
 
+#ifdef CONFIG_CPU_HAS_FPU
 	/*
 	 * check if we need to save FPU registers
 	 */
@@ -67,6 +68,7 @@
 	fpu_save_double a0 t0 t1		# c0_status passed in t0
 						# clobbers t1
 1:
+#endif
 
 	/*
 	 * The order of restoring the registers takes care of the race
@@ -113,6 +115,7 @@
 	jr	ra
 	END(resume)
 
+#ifdef CONFIG_CPU_HAS_FPU
 /*
  * Save a thread's fp context.
  */
@@ -243,3 +246,4 @@ LEAF(_init_fpu)
 #endif
 	jr	ra
 	END(_init_fpu)
+#endif

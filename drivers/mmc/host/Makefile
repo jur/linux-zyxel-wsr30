@@ -58,6 +58,7 @@ obj-$(CONFIG_MMC_SDHCI_CNS3XXX)		+= sdhci-cns3xxx.o
 obj-$(CONFIG_MMC_SDHCI_ESDHC_IMX)	+= sdhci-esdhc-imx.o
 obj-$(CONFIG_MMC_SDHCI_DOVE)		+= sdhci-dove.o
 obj-$(CONFIG_MMC_SDHCI_TEGRA)		+= sdhci-tegra.o
+obj-$(CONFIG_MMC_SDHCI_RTK)		+= sdhci-rtk.o
 obj-$(CONFIG_MMC_SDHCI_OF_ESDHC)	+= sdhci-of-esdhc.o
 obj-$(CONFIG_MMC_SDHCI_OF_HLWD)		+= sdhci-of-hlwd.o
 obj-$(CONFIG_MMC_SDHCI_BCM2835)		+= sdhci-bcm2835.o
@@ -65,3 +66,16 @@ obj-$(CONFIG_MMC_SDHCI_BCM2835)		+= sdhci-bcm2835.o
 ifeq ($(CONFIG_CB710_DEBUG),y)
 	CFLAGS-cb710-mmc	+= -DDEBUG
 endif
+
+obj-$(CONFIG_MMC_RTK_SDMMC)		+= rtk-sdmmc.o
+ifeq ($(CONFIG_MMC_RTKEMMC),y)
+obj-$(CONFIG_MMC_RTKEMMC)       	+= rtkemmc.o
+obj-$(CONFIG_MMC_BLOCK)         	+= rtksd_ops.o
+endif
+
+rtksd_mod-y += rtk_crsd_ops.o rtksd.o
+obj-$(CONFIG_MMC_RTKSD) += rtksd_mod.o
+
+
+
+

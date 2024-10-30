@@ -56,6 +56,14 @@
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_6RD_SUPPORT
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl865x_netif.h>
+#include "../../drivers/net/rtl819x/l3Driver/rtl865x_6rd.h"
+#endif
+#endif
+
 /*
    This version of net/ipv6/sit.c is cloned of net/ipv4/ip_gre.c
 
@@ -194,6 +202,12 @@ static int ipip6_tunnel_create(struct net_device *dev)
 	struct net *net = dev_net(dev);
 	struct sit_net *sitn = net_generic(net, sit_net_id);
 	int err;
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_6RD_SUPPORT
+	extern int32 rtl865x_updatev6SwNetif(char *netifName,int iftype);
+#endif
+#endif
+
 
 	err = ipip6_tunnel_init(dev);
 	if (err < 0)
@@ -213,6 +227,12 @@ static int ipip6_tunnel_create(struct net_device *dev)
 	dev_hold(dev);
 
 	ipip6_tunnel_link(sitn, t);
+
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_6RD_SUPPORT
+	rtl865x_updatev6SwNetif(dev->name,IF_6RD);
+#endif
+#endif
 	return 0;
 
 out:
@@ -808,6 +828,8 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 			addr_type = ipv6_addr_type(addr6);
 		}
 
+		addr_type = ipv6_addr_type(addr6);
+
 		if ((addr_type & IPV6_ADDR_COMPATv4) != 0)
 			dst = addr6->s6_addr32[3];
 		else
@@ -1032,6 +1054,11 @@ ipip6_tunnel_ioctl (struct net_device *dev, struct ifreq *ifr, int cmd)
 	struct sit_net *sitn = net_generic(net, sit_net_id);
 #ifdef CONFIG_IPV6_SIT_6RD
 	struct ip_tunnel_6rd ip6rd;
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_6RD_SUPPORT
+		extern int32 _rtl865x_addIpv66RDEntry(struct ip_tunnel *t);
+#endif
+#endif
 #endif
 
 	switch (cmd) {
@@ -1195,6 +1222,20 @@ ipip6_tunnel_ioctl (struct net_device *dev, struct ifreq *ifr, int cmd)
 				goto done;
 		} else
 			ipip6_tunnel_clone_6rd(dev, sitn);
+
+#if 0
+		printk("%s %d: if: %s, mtu: %d\n", __FUNCTION__, __LINE__, dev->name, dev->mtu);
+		printk("%s %d: if: %s, ce: %x\n", __FUNCTION__, __LINE__, t->parms.name, t->parms.iph.saddr);
+		printk("%s %d: preifx:%x %x %x %x/%d\n", __FUNCTION__, __LINE__,
+			t->ip6rd.prefix.s6_addr32[0], t->ip6rd.prefix.s6_addr32[1],
+			t->ip6rd.prefix.s6_addr32[2], t->ip6rd.prefix.s6_addr32[3],
+			t->ip6rd.prefixlen);
+#endif
+#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+#ifdef CONFIG_RTL_HW_6RD_SUPPORT
+		_rtl865x_addIpv66RDEntry(t);
+#endif
+#endif
 
 		err = 0;
 		break;

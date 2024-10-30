@@ -23,6 +23,14 @@
 #include <linux/netfilter/x_tables.h>
 #include <net/netfilter/nf_nat.h>
 
+#if defined (CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
+#if defined(CONFIG_IP_NF_TARGET_CONENAT)
+#include <net/netfilter/nf_conntrack_helper.h>
+#endif
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
 MODULE_DESCRIPTION("Xtables: automatic-address SNAT");
@@ -53,6 +61,10 @@ masquerade_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	const struct nf_nat_ipv4_multi_range_compat *mr;
 	const struct rtable *rt;
 	__be32 newsrc, nh;
+	#if defined(CONFIG_IP_NF_TARGET_CONENAT)
+	extern unsigned int conenat_type;
+	unsigned int ret;
+	#endif
 
 	NF_CT_ASSERT(par->hooknum == NF_INET_POST_ROUTING);
 
@@ -78,6 +90,16 @@ masquerade_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	}
 
 	nat->masq_index = par->out->ifindex;
+
+#if defined(CONFIG_IP_NF_TARGET_CONENAT)
+	if ((conenat_type >=1) && (conenat_type <= 3) &&(nfct_help(ct)==NULL)&&
+	     (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.protonum == IPPROTO_UDP))
+	{
+	       extern unsigned int rtl_find_appropriate_newrange(struct nf_conn *ct, __be32 newsrc, const struct nf_nat_multi_range_compat *mr);
+		ret = rtl_find_appropriate_newrange(ct, newsrc, mr);
+		return ret;
+	}
+#endif
 
 	/* Transfer from original range. */
 	memset(&newrange.min_addr, 0, sizeof(newrange.min_addr));
@@ -121,6 +143,10 @@ static int masq_device_event(struct notifier_block *this,
 				      (void *)(long)dev->ifindex);
 	}
 
+#if defined (CONFIG_RTL_819X)
+	rtl_masq_device_event_hooks(this,(struct net_device *)dev,event);
+#endif
+
 	return NOTIFY_DONE;
 }
 
@@ -129,6 +155,11 @@ static int masq_inet_event(struct notifier_block *this,
 			   void *ptr)
 {
 	struct net_device *dev = ((struct in_ifaddr *)ptr)->ifa_dev->dev;
+
+#if defined (CONFIG_RTL_819X)
+	rtl_masq_inet_event_hooks(this, event,  ptr);
+#endif
+
 	return masq_device_event(this, event, dev);
 }
 

@@ -170,7 +170,11 @@ static bool ipv6_chk_same_addr(struct net *net, const struct in6_addr *addr,
 			       struct net_device *dev);
 
 static struct ipv6_devconf ipv6_devconf __read_mostly = {
+#ifdef CONFIG_RTL_IPV6READYLOGO
+	.forwarding		= 1,
+#else
 	.forwarding		= 0,
+#endif
 	.hop_limit		= IPV6_DEFAULT_HOPLIMIT,
 	.mtu6			= IPV6_MIN_MTU,
 	.accept_ra		= 1,
@@ -201,11 +205,20 @@ static struct ipv6_devconf ipv6_devconf __read_mostly = {
 	.proxy_ndp		= 0,
 	.accept_source_route	= 0,	/* we do not accept RH0 by default. */
 	.disable_ipv6		= 0,
-	.accept_dad		= 1,
+#ifdef CONFIG_RTL_IPV6READYLOGO
+	.accept_dad			= 2,
+#else
+	.accept_dad 		= 1,
+#endif
+
 };
 
 static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
-	.forwarding		= 0,
+#ifdef CONFIG_RTL_IPV6READYLOGO
+		.forwarding 	= 1,
+#else
+		.forwarding 	= 0,
+#endif
 	.hop_limit		= IPV6_DEFAULT_HOPLIMIT,
 	.mtu6			= IPV6_MIN_MTU,
 	.accept_ra		= 1,
@@ -235,7 +248,12 @@ static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
 	.proxy_ndp		= 0,
 	.accept_source_route	= 0,	/* we do not accept RH0 by default. */
 	.disable_ipv6		= 0,
-	.accept_dad		= 1,
+#ifdef CONFIG_RTL_IPV6READYLOGO
+	.accept_dad			= 2,
+#else
+	.accept_dad 		= 1,
+#endif
+
 };
 
 /* IPv6 Wildcard Address and Loopback Address defined by RFC2553 */
@@ -2114,7 +2132,13 @@ void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
 	 *	1) Add routes for on-link prefixes
 	 *	2) Configure prefixes with the auto flag set
 	 */
-
+#ifndef CONFIG_RTL_HARDWARE_IPV6_SUPPORT
+/*
+*	When enable hardware ipv6 route table,  
+* 	"1) Add routes for on-link prefixes" will set after  "2) Configure prefixes with the auto flag set"
+*	In order when wan pppoe add route, sync route to hardware ipv6 route table, it can obtain global ipv6 address 
+*	and add a [pppoe global ip]/128 route to CPU. Or else, the dest ip to [pppoe global ip] packet will be send to ppp0
+*/
 	if (pinfo->onlink) {
 		struct rt6_info *rt;
 		unsigned long rt_expires;
@@ -2162,7 +2186,7 @@ void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len, bool sllao)
 		}
 		ip6_rt_put(rt);
 	}
-
+#endif
 	/* Try to figure out our local address for this prefix */
 
 	if (pinfo->autoconf && in6_dev->cnf.autoconf) {
@@ -2364,6 +2388,57 @@ ok:
 			addrconf_verify(0);
 		}
 	}
+#ifdef CONFIG_RTL_HARDWARE_IPV6_SUPPORT
+
+	if (pinfo->onlink) {
+		struct rt6_info *rt;
+		unsigned long rt_expires;
+
+		/* Avoid arithmetic overflow. Really, we could
+		 * save rt_expires in seconds, likely valid_lft,
+		 * but it would require division in fib gc, that it
+		 * not good.
+		 */
+		if (HZ > USER_HZ)
+			rt_expires = addrconf_timeout_fixup(valid_lft, HZ);
+		else
+			rt_expires = addrconf_timeout_fixup(valid_lft, USER_HZ);
+
+		if (addrconf_finite_timeout(rt_expires))
+			rt_expires *= HZ;
+
+		rt = addrconf_get_prefix_route(&pinfo->prefix,
+					       pinfo->prefix_len,
+					       dev,
+					       RTF_ADDRCONF | RTF_PREFIX_RT,
+					       RTF_GATEWAY | RTF_DEFAULT);
+
+		if (rt) {
+			/* Autoconf prefix route */
+			if (valid_lft == 0) {
+				ip6_del_rt(rt);
+				rt = NULL;
+			} else if (addrconf_finite_timeout(rt_expires)) {
+				/* not infinity */
+				rt6_set_expires(rt, jiffies + rt_expires);
+			} else {
+				rt6_clean_expires(rt);
+			}
+		} else if (valid_lft) {
+			clock_t expires = 0;
+			int flags = RTF_ADDRCONF | RTF_PREFIX_RT;
+			if (addrconf_finite_timeout(rt_expires)) {
+				/* not infinity */
+				flags |= RTF_EXPIRES;
+				expires = jiffies_to_clock_t(rt_expires);
+			}
+			addrconf_prefix_route(&pinfo->prefix, pinfo->prefix_len,
+					      dev, expires, flags);
+		}
+		ip6_rt_put(rt);
+	}
+#endif
+	
 	inet6_prefix_notify(RTM_NEWPREFIX, in6_dev, pinfo);
 	in6_dev_put(in6_dev);
 }
@@ -2752,6 +2827,17 @@ static void addrconf_dev_config(struct net_device *dev)
 		/* Alas, we support only Ethernet autoconfiguration. */
 		return;
 	}
+	
+#if defined(CONFIG_RTL_IPV6READYLOGO)
+		/*We only add link local address on br0 for LAN and eth1 for WAN*/
+		if(strcmp(dev->name,"eth1")){
+        	if(!strncmp(dev->name,"eth",strlen("eth")))
+                return;
+				
+       		if(!strncmp(dev->name,"wlan",strlen("wlan")))
+                return;
+		}
+#endif
 
 	idev = addrconf_add_dev(dev);
 	if (IS_ERR(idev))
@@ -3271,12 +3357,126 @@ out:
 	spin_unlock(&ifp->lock);
 	read_unlock_bh(&idev->lock);
 }
+#if 0//defined(CONFIG_RTL_IPV6READYLOGO)
+#include "../bridge/br_private.h"
+static int delay_flag=0;
+int check_lan_port_state(struct net_device *dev)
+{
+	struct net_device *sdev;
+	if(!(dev->br_port ) ) 
+	{
+		struct net *net = dev_net(dev);		
+		for_each_netdev(net, sdev)
+		{
+			if((sdev->br_port) && (!memcmp(sdev->name,"eth",3)))
+			{
+				if(!sdev->br_port) return 0;
+				return sdev->br_port->state;
+			}
+			continue;
+		}	        	
+	}
+	else
+		return dev->br_port->state;
+	return 0;
+}
 
 static void addrconf_dad_timer(unsigned long data)
 {
 	struct inet6_ifaddr *ifp = (struct inet6_ifaddr *) data;
 	struct inet6_dev *idev = ifp->idev;
 	struct in6_addr mcaddr;
+
+	if (!ifp->probes && addrconf_dad_end(ifp))
+		goto out;
+
+	read_lock(&idev->lock);
+	if (idev->dead || !(idev->if_flags & IF_READY)) {
+		read_unlock(&idev->lock);
+		goto out;
+	}
+
+	spin_lock(&ifp->lock);
+	if (ifp->state == INET6_IFADDR_STATE_DEAD) {
+		spin_unlock(&ifp->lock);
+		read_unlock(&idev->lock);
+		goto out;
+	}
+
+	printk("%s %d lan port state: %d\n", __FUNCTION__, __LINE__, check_lan_port_state(idev->dev));
+//	if(check_lan_port_state(idev->dev) != BR_STATE_FORWARDING)
+//	{
+//		printk("%s %d\n", __FUNCTION__, __LINE__);
+//		if(!ifp->probes) ifp->probes=1;
+//	}
+//	else 
+	{
+		printk("%s %d\n", __FUNCTION__, __LINE__);
+		if(!delay_flag) 
+		{
+			printk("%s %d\n", __FUNCTION__, __LINE__);
+			if(!ifp->probes) ifp->probes=1;
+			delay_flag=1;
+		}
+	} 
+
+	if (ifp->probes == 0) {
+		/*
+		 * DAD was successful
+		 */
+		 printk("%s %d\n", __FUNCTION__, __LINE__);
+
+		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC|IFA_F_DADFAILED);
+		spin_unlock(&ifp->lock);
+		read_unlock(&idev->lock);
+
+		addrconf_dad_completed(ifp);
+
+		goto out;
+	}
+	else
+	{
+		printk("%s %d\n", __FUNCTION__, __LINE__);
+		/* send a neighbour solicitation for our addr */		
+		if(delay_flag)
+		{
+			printk("%s %d\n", __FUNCTION__, __LINE__);
+
+			ifp->probes--;
+			addrconf_mod_timer(ifp, AC_DAD, 50);
+			spin_unlock(&ifp->lock);
+			read_unlock(&idev->lock);
+
+			/* send a neighbour solicitation for our addr */
+			addrconf_addr_solict_mult(&ifp->addr, &mcaddr);
+			ndisc_send_ns(ifp->idev->dev, NULL, &ifp->addr, &mcaddr, &in6addr_any);
+		}
+		else
+		{
+			printk("%s %d\n", __FUNCTION__, __LINE__);
+			ifp->probes--;
+			addrconf_mod_timer(ifp, AC_DAD, ifp->idev->nd_parms->retrans_time);
+			spin_unlock_bh(&ifp->lock);
+			read_unlock_bh(&idev->lock);
+		}
+	}
+out:
+	in6_ifa_put(ifp);
+}
+#else
+static void addrconf_dad_timer(unsigned long data)
+{
+	struct inet6_ifaddr *ifp = (struct inet6_ifaddr *) data;
+	struct inet6_dev *idev = ifp->idev;
+	struct in6_addr mcaddr;
+
+#if 0
+	printk("%s %d dev %s %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", __FUNCTION__, __LINE__, idev->dev->name,
+		ifp->addr.s6_addr[0],ifp->addr.s6_addr[1],ifp->addr.s6_addr[2],ifp->addr.s6_addr[3],
+		ifp->addr.s6_addr[4],ifp->addr.s6_addr[5],ifp->addr.s6_addr[6],ifp->addr.s6_addr[7],
+		ifp->addr.s6_addr[8],ifp->addr.s6_addr[9],ifp->addr.s6_addr[10],ifp->addr.s6_addr[11],
+		ifp->addr.s6_addr[12],ifp->addr.s6_addr[13],ifp->addr.s6_addr[14],ifp->addr.s6_addr[15]);
+#endif
 
 	if (!ifp->probes && addrconf_dad_end(ifp))
 		goto out;
@@ -3319,7 +3519,7 @@ static void addrconf_dad_timer(unsigned long data)
 out:
 	in6_ifa_put(ifp);
 }
-
+#endif
 static void addrconf_dad_completed(struct inet6_ifaddr *ifp)
 {
 	struct net_device *dev = ifp->idev->dev;

@@ -37,6 +37,7 @@
 #define PRID_COMP_CAVIUM	0x0d0000
 #define PRID_COMP_INGENIC	0xd00000
 
+#define PRID_IMP_MASK		0xff00
 /*
  * Assigned values for the product ID register.	 In order to detect a
  * certain CPU type exactly eventually additional registers may need to
@@ -264,7 +265,7 @@ enum cpu_type_enum {
 	 */
 	CPU_4KC, CPU_4KEC, CPU_4KSC, CPU_24K, CPU_34K, CPU_1004K, CPU_74K,
 	CPU_ALCHEMY, CPU_PR4450, CPU_BMIPS32, CPU_BMIPS3300, CPU_BMIPS4350,
-	CPU_BMIPS4380, CPU_BMIPS5000, CPU_JZRISC, CPU_LOONGSON1, CPU_M14KC,
+	CPU_BMIPS4380, CPU_BMIPS5000, CPU_JZRISC,CPU_1074K, CPU_LOONGSON1, CPU_M14KC,
 	CPU_M14KEC,
 
 	/*

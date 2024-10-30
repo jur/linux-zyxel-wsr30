@@ -22,6 +22,7 @@
 
 struct lp55xx_led_config {
 	const char *name;
+	const char *default_trigger;
 	u8 chan_nr;
 	u8 led_current; /* mA x10, 0 if led is not connected */
 	u8 max_current;
@@ -34,6 +35,9 @@ struct lp55xx_predef_pattern {
 	u8 size_r;
 	u8 size_g;
 	u8 size_b;
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	unsigned int eng_start_addr;
+#endif
 };
 
 /*
@@ -67,6 +71,16 @@ struct lp55xx_platform_data {
 	/* Predefined pattern data */
 	struct lp55xx_predef_pattern *patterns;
 	unsigned int num_patterns;
+
+#if defined(CONFIG_ZYXEL_LEDS_LP5562_W_PRED_PAT)
+	/* Predefined wpattern data */
+	struct lp55xx_predef_pattern *wpatterns;
+	unsigned int num_wpatterns;
+#endif
+
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	unsigned int eng_start_addr;
+#endif
 };
 
 #endif /* _LEDS_LP55XX_H */

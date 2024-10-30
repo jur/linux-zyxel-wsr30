@@ -34,6 +34,10 @@
 #include <net/sock.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT)
+#include <net/rtl/rtl865x_netif.h>
+#include <net/rtl/rtl865x_outputQueue.h>
+#endif
 
 static int qdisc_notify(struct net *net, struct sk_buff *oskb,
 			struct nlmsghdr *n, u32 clid,
@@ -1011,8 +1015,31 @@ check_loop_fn(struct Qdisc *q, unsigned long cl, struct qdisc_walker *w)
 	return 0;
 }
 
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
 /*
- * Delete/get qdisc.
+   Patch for hardware
+  */
+
+static int tc_sync_hardware(struct net_device *dev)
+{
+	struct Qdisc_class_ops *cops;
+
+	if (dev==NULL||netdev_get_tx_queue(dev,0)->qdisc_sleeping==NULL
+		||netdev_get_tx_queue(dev,0)->qdisc_sleeping->ops==NULL)
+		return -EINVAL;
+
+	cops = netdev_get_tx_queue(dev,0)->qdisc_sleeping->ops->cl_ops;
+
+	if (cops && cops->syncHwQueue)
+		return cops->syncHwQueue(dev);
+	else
+	{
+		rtl865x_qosFlushBandwidth(dev->name);
+		return rtl865x_closeQos(dev->name);
+	}
+}
+#endif
+/* Delete/get qdisc.
  */
 
 static int tc_get_qdisc(struct sk_buff *skb, struct nlmsghdr *n)
@@ -1073,6 +1100,9 @@ static int tc_get_qdisc(struct sk_buff *skb, struct nlmsghdr *n)
 		err = qdisc_graft(dev, p, skb, n, clid, NULL, q);
 		if (err != 0)
 			return err;
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
+		tc_sync_hardware(dev);
+#endif
 	} else {
 		qdisc_notify(net, skb, n, clid, NULL, q);
 	}
@@ -1234,6 +1264,9 @@ graft:
 		return err;
 	}
 
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	tc_sync_hardware(dev);
+#endif
 	return 0;
 }
 
@@ -1739,6 +1772,22 @@ int tc_classify_compat(struct sk_buff *skb, const struct tcf_proto *tp,
 }
 EXPORT_SYMBOL(tc_classify_compat);
 
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
+int tc_classifyMark(__u32 mark, struct tcf_proto *tp, struct tcf_result *res)
+{
+	for ( ; tp; tp = tp->next)
+	{
+		if (tp->ops!=NULL && tp->ops->classifyMark!=NULL &&
+			tp->ops->classifyMark(mark, tp, res)==0)
+		{
+			return 0;
+		}
+	}
+
+	return -1;
+}
+
+#endif
 int tc_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		struct tcf_result *res)
 {

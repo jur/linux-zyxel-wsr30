@@ -31,7 +31,7 @@
 #define ipt_entry_match xt_entry_match
 #define ipt_entry_target xt_entry_target
 #define ipt_standard_target xt_standard_target
-#define ipt_error_target xt_error_target
+//#define ipt_error_target xt_error_target
 #define ipt_counters xt_counters
 #define IPT_CONTINUE XT_CONTINUE
 #define IPT_RETURN XT_RETURN
@@ -97,6 +97,12 @@ struct ipt_ip {
 #define IPT_INV_FRAG		0x20	/* Invert the sense of FRAG. */
 #define IPT_INV_PROTO		XT_INV_PROTO
 #define IPT_INV_MASK		0x7F	/* All possible flag bits mask. */
+
+#if	defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+/* Values for special return value	*/
+#define	RTL_QOSFINDSPECIALNETIF		1
+#endif
+
 
 /* This structure defines each of the firewall rules.  Consists of 3
    parts which are 1) general IP header stuff 2) match specific

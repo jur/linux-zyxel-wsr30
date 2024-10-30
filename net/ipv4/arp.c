@@ -126,6 +126,13 @@ static int arp_constructor(struct neighbour *neigh);
 static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb);
 static void arp_error_report(struct neighbour *neigh, struct sk_buff *skb);
 static void parp_redo(struct sk_buff *skb);
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+	#include <net/rtl/rtk_vlan.h>
+	static struct vlan_tag arp_tag;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+	static struct vlan_info *arp_info;
+#endif
+#endif
 
 static const struct neigh_ops arp_generic_ops = {
 	.family =		AF_INET,
@@ -374,9 +381,23 @@ static void arp_solicit(struct neighbour *neigh, struct sk_buff *skb)
 			return;
 		}
 	}
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+        if (skb){
+            arp_tag = skb->tag;
+	#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+            arp_info = skb->src_info;
+	#endif
+        }
+#endif
 
 	arp_send(ARPOP_REQUEST, ETH_P_ARP, target, dev, saddr,
 		 dst_hw, dev->dev_addr, NULL);
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+        arp_tag.v = 0;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+        arp_info = NULL;
+#endif
+#endif
 }
 
 static int arp_ignore(struct in_device *in_dev, __be32 sip, __be32 tip)
@@ -595,6 +616,12 @@ struct sk_buff *arp_create(int type, int ptype, __be32 dest_ip,
 	arp = (struct arphdr *) skb_put(skb, arp_hdr_len(dev));
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_ARP);
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+        skb->tag = arp_tag;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+        skb->src_info = arp_info;
+#endif
+#endif
 	if (src_hw == NULL)
 		src_hw = dev->dev_addr;
 	if (dest_hw == NULL)
@@ -828,6 +855,14 @@ static int arp_process(struct sk_buff *skb)
  *  and in the case of requests for us we add the requester to the arp
  *  cache.
  */
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+    if (skb){
+        arp_tag = skb->tag;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+        arp_info = skb->src_info;
+#endif
+    }
+#endif
 
 	/* Special case: IPv4 duplicate address detection packet (RFC2131) */
 	if (sip == 0) {
@@ -927,6 +962,12 @@ static int arp_process(struct sk_buff *skb)
 
 out:
 	consume_skb(skb);
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+    arp_tag.v = 0;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+    arp_info = NULL;
+#endif
+#endif
 	return 0;
 }
 
@@ -1085,6 +1126,11 @@ static unsigned int arp_state_to_flags(struct neighbour *neigh)
 		return 0;
 }
 
+#if defined (CONFIG_RTL_819X)
+extern int get_dev_ip_mask(const char * name,unsigned int * ip,unsigned int * mask);
+#endif
+
+
 /*
  *	Get an ARP cache entry.
  */
@@ -1094,6 +1140,11 @@ static int arp_req_get(struct arpreq *r, struct net_device *dev)
 	__be32 ip = ((struct sockaddr_in *) &r->arp_pa)->sin_addr.s_addr;
 	struct neighbour *neigh;
 	int err = -ENXIO;
+#if defined (CONFIG_RTL_819X)
+	unsigned int dev_ip, dev_mask;
+	unsigned char zero_ha[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];
+	int ret=-1;
+#endif
 
 	neigh = neigh_lookup(&arp_tbl, &ip, dev);
 	if (neigh) {
@@ -1106,6 +1157,41 @@ static int arp_req_get(struct arpreq *r, struct net_device *dev)
 		neigh_release(neigh);
 		err = 0;
 	}
+
+#if defined (CONFIG_RTL_819X)
+	if (neigh) 
+	{
+		memset(zero_ha, 0 , sizeof(zero_ha));
+		if( (memcmp(neigh->ha, zero_ha , dev->addr_len)==0) &&
+			((dev!=NULL) && (strncmp(dev->name, "br0",3)==0)))
+		{			
+			ret=get_dev_ip_mask(dev->name, &dev_ip, &dev_mask); 
+			if((ret==0) && (dev_ip !=0) && (dev_mask!=0) && (ip!= dev_ip) && ((ip & dev_mask) == (dev_ip & dev_mask)))
+			{
+				arp_send(ARPOP_REQUEST, ETH_P_ARP, ip, dev, dev_ip,NULL, dev->dev_addr, NULL);
+			}
+		}
+
+	}
+	else
+	{
+		if((dev!=NULL) && (strncmp(dev->name, "br0",3)==0))
+		{
+			
+			ret=get_dev_ip_mask(dev->name, &dev_ip, &dev_mask);
+			if((ret==0) && (dev_ip !=0) && (dev_mask!=0) && (ip!= dev_ip) && ((ip & dev_mask) == (dev_ip & dev_mask)))
+			{
+				neigh = __neigh_lookup(&arp_tbl,&ip, dev,1);	
+				arp_send(ARPOP_REQUEST, ETH_P_ARP, ip, dev, dev_ip,NULL, dev->dev_addr, NULL);
+				if(neigh)
+					neigh_release(neigh);
+				//printk("%s:%d,neigh->refcnt is %d\n",__FUNCTION__,__LINE__,atomic_read(&neigh->refcnt));
+			}
+		}
+		
+	}
+#endif
+	
 	return err;
 }
 
@@ -1283,6 +1369,12 @@ void __init arp_init(void)
 	neigh_sysctl_register(NULL, &arp_tbl.parms, "ipv4", NULL);
 #endif
 	register_netdevice_notifier(&arp_netdev_notifier);
+#ifdef CONFIG_RTK_VLAN_SUPPORT
+	arp_tag.v = 0;
+#if defined(CONFIG_RTK_BRIDGE_VLAN_SUPPORT)
+	arp_info = NULL;
+#endif
+#endif
 }
 
 #ifdef CONFIG_PROC_FS

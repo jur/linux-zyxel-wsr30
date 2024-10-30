@@ -33,7 +33,7 @@ extern int rtc_mips_set_mmss(unsigned long);
 /*
  * board specific routines required by time_init().
  */
-extern void plat_time_init(void);
+extern void bsp_time_init(void);
 
 /*
  * mips_hpt_frequency - must be set if you intend to use an R4k-compatible
@@ -50,19 +50,30 @@ extern int (*perf_irq)(void);
 /*
  * Initialize the calling CPU's compare interrupt as clockevent device
  */
+#if defined(CONFIG_CEVT_R4K)
 extern unsigned int __weak get_c0_compare_int(void);
-extern int r4k_clockevent_init(void);
-extern int smtc_clockevent_init(void);
+extern int r4k_clockevent_init(int);
+#endif
+#ifdef CONFIG_CEVT_EXT
+extern int ext_clockevent_init(int);
+#endif
+#ifdef CONFIG_MIPS_MT_SMTC
+extern int smtc_clockevent_init(int);
+#endif
+#ifdef CONFIG_CEVT_GIC
 extern int gic_clockevent_init(void);
+#endif
 
-static inline int mips_clockevent_init(void)
+static inline int mips_clockevent_init(int irq)
 {
 #ifdef CONFIG_MIPS_MT_SMTC
-	return smtc_clockevent_init();
+	return smtc_clockevent_init(irq);
 #elif defined(CONFIG_CEVT_GIC)
 	return (gic_clockevent_init() | r4k_clockevent_init());
 #elif defined(CONFIG_CEVT_R4K)
-	return r4k_clockevent_init();
+	return r4k_clockevent_init(irq);
+#elif defined(CONFIG_CEVT_EXT)
+	return ext_clockevent_init(irq);
 #else
 	return -ENXIO;
 #endif
@@ -71,12 +82,14 @@ static inline int mips_clockevent_init(void)
 /*
  * Initialize the count register as a clocksource
  */
-extern int init_r4k_clocksource(void);
+#ifdef CONFIG_CSRC_R4K
+extern int r4k_clocksource_init(void);
+#endif
 
-static inline int init_mips_clocksource(void)
+static inline int mips_clocksource_init(void)
 {
 #if defined(CONFIG_CSRC_R4K) && !defined(CONFIG_CSRC_GIC)
-	return init_r4k_clocksource();
+	return r4k_clocksource_init();
 #else
 	return 0;
 #endif

@@ -366,6 +366,14 @@ static int parse_cmdline_partitions(struct mtd_info *master,
 	if (!*pparts)
 		return -ENOMEM;
 
+	/* check if nand reserve %10 space for skip/remap bbt */
+#ifdef CONFIG_MTD_NAND
+	int rtkn_check_nand_partition(struct mtd_partition *parts,int partnum);
+	if(rtkn_check_nand_partition(part->parts,part->num_parts) < 0){
+		return -1;
+	}
+#endif
+
 	return part->num_parts;
 }
 

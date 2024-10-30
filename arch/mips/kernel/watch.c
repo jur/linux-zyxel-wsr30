@@ -6,6 +6,7 @@
  * Copyright (C) 2008 David Daney
  */
 
+#ifdef CONFIG_CPU_HAS_WATCH
 #include <linux/sched.h>
 
 #include <asm/processor.h>
@@ -111,6 +112,7 @@ __cpuinit void mips_probe_watch_registers(struct cpuinfo_mips *c)
 	 * disable the register.
 	 */
 	write_c0_watchlo0(7);
+	back_to_back_c0_hazard();
 	t = read_c0_watchlo0();
 	write_c0_watchlo0(0);
 	c->watch_reg_masks[0] = t & 7;
@@ -121,12 +123,14 @@ __cpuinit void mips_probe_watch_registers(struct cpuinfo_mips *c)
 	c->watch_reg_use_cnt = 1;
 	t = read_c0_watchhi0();
 	write_c0_watchhi0(t | 0xff8);
+	back_to_back_c0_hazard();
 	t = read_c0_watchhi0();
 	c->watch_reg_masks[0] |= (t & 0xff8);
 	if ((t & 0x80000000) == 0)
 		return;
 
 	write_c0_watchlo1(7);
+	back_to_back_c0_hazard();
 	t = read_c0_watchlo1();
 	write_c0_watchlo1(0);
 	c->watch_reg_masks[1] = t & 7;
@@ -135,12 +139,14 @@ __cpuinit void mips_probe_watch_registers(struct cpuinfo_mips *c)
 	c->watch_reg_use_cnt = 2;
 	t = read_c0_watchhi1();
 	write_c0_watchhi1(t | 0xff8);
+	back_to_back_c0_hazard();
 	t = read_c0_watchhi1();
 	c->watch_reg_masks[1] |= (t & 0xff8);
 	if ((t & 0x80000000) == 0)
 		return;
 
 	write_c0_watchlo2(7);
+	back_to_back_c0_hazard();
 	t = read_c0_watchlo2();
 	write_c0_watchlo2(0);
 	c->watch_reg_masks[2] = t & 7;
@@ -149,12 +155,14 @@ __cpuinit void mips_probe_watch_registers(struct cpuinfo_mips *c)
 	c->watch_reg_use_cnt = 3;
 	t = read_c0_watchhi2();
 	write_c0_watchhi2(t | 0xff8);
+	back_to_back_c0_hazard();
 	t = read_c0_watchhi2();
 	c->watch_reg_masks[2] |= (t & 0xff8);
 	if ((t & 0x80000000) == 0)
 		return;
 
 	write_c0_watchlo3(7);
+	back_to_back_c0_hazard();
 	t = read_c0_watchlo3();
 	write_c0_watchlo3(0);
 	c->watch_reg_masks[3] = t & 7;
@@ -163,6 +171,7 @@ __cpuinit void mips_probe_watch_registers(struct cpuinfo_mips *c)
 	c->watch_reg_use_cnt = 4;
 	t = read_c0_watchhi3();
 	write_c0_watchhi3(t | 0xff8);
+	back_to_back_c0_hazard();
 	t = read_c0_watchhi3();
 	c->watch_reg_masks[3] |= (t & 0xff8);
 	if ((t & 0x80000000) == 0)
@@ -186,3 +195,4 @@ __cpuinit void mips_probe_watch_registers(struct cpuinfo_mips *c)
 
 	c->watch_reg_count = 8;
 }
+#endif

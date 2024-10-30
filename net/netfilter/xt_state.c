@@ -55,6 +55,26 @@ static void state_mt_destroy(const struct xt_mtdtor_param *par)
 	nf_ct_l3proto_module_put(par->family);
 }
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static int state_match2acl(const char *tablename,
+			  const void *ip,
+			  const struct xt_match *match,
+			  void *matchinfo,
+			  void *acl_rule,
+			  unsigned int *invflags)
+{
+	const struct xt_state_info *sinfo = (struct xt_state_info *)matchinfo;
+	
+	if(sinfo->statemask & XT_STATE_BIT(IP_CT_ESTABLISHED))
+	{
+		return RTL865X_ESTABLISH_RULE;
+	}
+	/*if state rule is added, don't add this rule to rtl865x ACL table...skip this rule now.*/
+	return RTL865X_SKIP_THIS_RULE;	
+}
+#endif
+
+
 static struct xt_match state_mt_reg __read_mostly = {
 	.name       = "state",
 	.family     = NFPROTO_UNSPEC,
@@ -63,6 +83,10 @@ static struct xt_match state_mt_reg __read_mostly = {
 	.destroy    = state_mt_destroy,
 	.matchsize  = sizeof(struct xt_state_info),
 	.me         = THIS_MODULE,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	.match2acl	= state_match2acl,
+#endif
+
 };
 
 static int __init state_mt_init(void)

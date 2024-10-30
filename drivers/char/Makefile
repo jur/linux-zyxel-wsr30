@@ -49,6 +49,17 @@ obj-$(CONFIG_NSC_GPIO)		+= nsc_gpio.o
 obj-$(CONFIG_GPIO_TB0219)	+= tb0219.o
 obj-$(CONFIG_TELCLOCK)		+= tlclk.o
 
+ifeq ($(CONFIG_RTL819X_GPIO),y)
+obj-y						+= rtl_gpio.o
+else
+ifeq ($(CONFIG_RTL_8198C),y)
+obj-$(CONFIG_RTL_8198C)          += rtl_gpio_98C.o
+else
+#obj-$(CONFIG_RTL_819XD)          += rtl_gpio_9xD.o
+obj-y          += rtl_gpio_9xD.o
+endif
+endif
+
 obj-$(CONFIG_MWAVE)		+= mwave/
 obj-$(CONFIG_AGP)		+= agp/
 obj-$(CONFIG_PCMCIA)		+= pcmcia/
@@ -62,3 +73,7 @@ obj-$(CONFIG_JS_RTC)		+= js-rtc.o
 js-rtc-y = rtc.o
 
 obj-$(CONFIG_TILE_SROM)		+= tile-srom.o
+
+ifeq ($(CONFIG_RTL_8197F),y) 
+	obj-$(CONFIG_RTL_8211F_SUPPORT)		+= rtl_nfbi/
+endif	

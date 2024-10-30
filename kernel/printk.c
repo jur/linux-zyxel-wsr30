@@ -216,7 +216,7 @@ struct log {
  */
 static DEFINE_RAW_SPINLOCK(logbuf_lock);
 
-#ifdef CONFIG_PRINTK
+#if defined( CONFIG_PRINTK ) || defined (CONFIG_PRINTK_FUNC)
 DECLARE_WAIT_QUEUE_HEAD(log_wait);
 /* the next printk record to read by syslog(READ) or /proc/kmsg */
 static u64 syslog_seq;
@@ -1678,11 +1678,12 @@ EXPORT_SYMBOL(printk_emit);
  *
  * See the vsnprintf() documentation for format string extensions over C99.
  */
+
 asmlinkage int printk(const char *fmt, ...)
 {
 	va_list args;
 	int r;
-
+	
 #ifdef CONFIG_KGDB_KDB
 	if (unlikely(kdb_trap_printk)) {
 		va_start(args, fmt);
@@ -2447,7 +2448,7 @@ static int __init printk_late_init(void)
 }
 late_initcall(printk_late_init);
 
-#if defined CONFIG_PRINTK
+#if defined CONFIG_PRINTK || defined (CONFIG_PRINTK_FUNC)
 /*
  * Delayed printk version, for scheduler-internal messages:
  */
@@ -2924,3 +2925,175 @@ void show_regs_print_info(const char *log_lvl)
 }
 
 #endif
+
+#if defined (CONFIG_PRINTK_FUNC)
+asmlinkage int scrlog_vprintk(int facility, int level,
+			    const char *dict, size_t dictlen,
+			    const char *fmt, va_list args)
+{
+	static int recursion_bug;
+	static char textbuf[LOG_LINE_MAX];
+	char *text = textbuf;
+	size_t text_len;
+	enum log_flags lflags = LOG_NOCONS;
+	unsigned long flags;
+	int this_cpu;
+	int printed_len = 0;
+
+	boot_delay_msec(level);
+	printk_delay();
+
+	/* This stops the holder of console_sem just where we want him */
+	local_irq_save(flags);
+	this_cpu = smp_processor_id();
+
+	/*
+	 * Ouch, printk recursed into itself!
+	 */
+	if (unlikely(logbuf_cpu == this_cpu)) {
+		/*
+		 * If a crash is occurring during printk() on this CPU,
+		 * then try to get the crash message out but make sure
+		 * we can't deadlock. Otherwise just return to avoid the
+		 * recursion and return - but flag the recursion so that
+		 * it can be printed at the next appropriate moment:
+		 */
+		if (!oops_in_progress && !lockdep_recursing(current)) {
+			recursion_bug = 1;
+			goto out_restore_irqs;
+		}
+		zap_locks();
+	}
+
+	lockdep_off();
+	raw_spin_lock(&logbuf_lock);
+	logbuf_cpu = this_cpu;
+
+	if (recursion_bug) {
+		static const char recursion_msg[] =
+			"BUG: recent printk recursion!";
+
+		recursion_bug = 0;
+		printed_len += strlen(recursion_msg);
+		/* emit KERN_CRIT message */
+		log_store(0, 2, LOG_PREFIX|LOG_NEWLINE, 0,
+			  NULL, 0, recursion_msg, printed_len);
+	}
+
+	/*
+	 * The printf needs to come first; we need the syslog
+	 * prefix which might be passed-in as a parameter.
+	 */
+	text_len = vscnprintf(text, sizeof(textbuf), fmt, args);
+
+	/* mark and strip a trailing newline */
+	if (text_len && text[text_len-1] == '\n') {
+		text_len--;
+		lflags |= LOG_NEWLINE;
+	}
+
+	/* strip kernel syslog prefix and extract log level or control flags */
+	if (facility == 0) {
+		int kern_level = printk_get_level(text);
+
+		if (kern_level) {
+			const char *end_of_header = printk_skip_level(text);
+			switch (kern_level) {
+			case '0' ... '7':
+				if (level == -1)
+					level = kern_level - '0';
+			case 'd':	/* KERN_DEFAULT */
+				lflags |= LOG_PREFIX;
+			case 'c':	/* KERN_CONT */
+				break;
+			}
+			text_len -= end_of_header - text;
+			text = (char *)end_of_header;
+		}
+	}
+
+	if (level == -1)
+		level = default_message_loglevel;
+
+	if (dict)
+		lflags |= LOG_PREFIX|LOG_NEWLINE;
+
+	if (!(lflags & LOG_NEWLINE)) {
+		/*
+		 * Flush the conflicting buffer. An earlier newline was missing,
+		 * or another task also prints continuation lines.
+		 */
+		if (cont.len && (lflags & LOG_PREFIX || cont.owner != current))
+			cont_flush(LOG_NEWLINE);
+
+		/* buffer line if possible, otherwise store it right away */
+		if (!cont_add(facility, level, text, text_len))
+			log_store(facility, level, lflags | LOG_CONT, 0,
+				  dict, dictlen, text, text_len);
+	} else {
+		bool stored = false;
+
+		/*
+		 * If an earlier newline was missing and it was the same task,
+		 * either merge it with the current buffer and flush, or if
+		 * there was a race with interrupts (prefix == true) then just
+		 * flush it out and store this line separately.
+		 */
+		if (cont.len && cont.owner == current) {
+			if (!(lflags & LOG_PREFIX))
+				stored = cont_add(facility, level, text, text_len);
+			cont_flush(LOG_NEWLINE);
+		}
+
+		if (!stored)
+			log_store(facility, level, lflags, 0,
+				  dict, dictlen, text, text_len);
+	}
+	printed_len += text_len;
+
+	/*
+	 * Try to acquire and then immediately release the console semaphore.
+	 * The release will print out buffers and wake up /dev/kmsg and syslog()
+	 * users.
+	 *
+	 * The console_trylock_for_printk() function will release 'logbuf_lock'
+	 * regardless of whether it actually gets the console semaphore or not.
+	 */
+	if (console_trylock_for_printk(this_cpu))
+		console_unlock();
+
+	lockdep_on();
+out_restore_irqs:
+	local_irq_restore(flags);
+
+	return printed_len;
+}
+
+asmlinkage int scrlog_printk(const char *fmt, ...)
+{
+	va_list args;
+	int r;
+
+	va_start(args, fmt);
+	r = scrlog_vprintk(0, -1, NULL, 0,fmt, args);
+	va_end(args);
+
+	return r;
+}
+
+EXPORT_SYMBOL(scrlog_vprintk);
+
+//#endif /*end  CONFIG_PRINTK_FUNC*/
+
+#else
+asmlinkage int scrlog_printk(const char *fmt, ...)
+{
+	return 0;
+}
+//static void call_console_drivers(unsigned start, unsigned end)
+//{
+//}
+#endif
+EXPORT_SYMBOL(scrlog_printk);
+
+

@@ -82,8 +82,10 @@ struct compressor {
 
 	/* Used in locking compressor modules */
 	struct module *owner;
+	#if !defined(CONFIG_PPP_MPPE_MPPC)
 	/* Extra skb space needed by the compressor algorithm */
 	unsigned int comp_extra;
+	#endif
 };
 
 /*

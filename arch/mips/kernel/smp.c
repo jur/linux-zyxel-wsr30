@@ -110,7 +110,7 @@ asmlinkage __cpuinit void start_secondary(void)
 #endif /* CONFIG_MIPS_MT_SMTC */
 	cpu_probe();
 	per_cpu_trap_init(false);
-	mips_clockevent_init();
+	mips_clockevent_init(cp0_compare_irq);
 	mp_ops->init_secondary();
 	cpu_report();
 
@@ -162,8 +162,7 @@ static void stop_this_cpu(void *dummy)
 	 */
 	set_cpu_online(smp_processor_id(), false);
 	for (;;) {
-		if (cpu_wait)
-			(*cpu_wait)();		/* Wait if available. */
+		cpu_wait();		/* Wait if available. */
 	}
 }
 

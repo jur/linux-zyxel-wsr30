@@ -386,4 +386,20 @@ static inline int ahci_nr_ports(u32 cap)
 	return (cap & 0x1f) + 1;
 }
 
+
+//======================================================================
+//wei add, for override kernel function
+//fast
+//#define SATA_REG_LITTLE_ENDIAN 1
+#ifdef SATA_REG_LITTLE_ENDIAN  //need sotware swap
+//#define readl(x)		cpu_to_le32((*(volatile unsigned int *)(x)))
+//#define writel(val, addr)	  (void)((*(volatile unsigned int *) (addr)) = (cpu_to_le32(val)))
+
+//for debug
+extern u32 ahci_readl(unsigned int *addr);
+extern void ahci_writel(unsigned int value,unsigned int *addr);
+#define readl(x)			ahci_readl(x)
+#define writel(val,addr)	ahci_writel(val,addr)
+#endif
+
 #endif /* _AHCI_H */

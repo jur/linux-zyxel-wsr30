@@ -912,15 +912,15 @@ void smtc_send_ipi(int cpu, int type, unsigned int action)
 			 * loop, we need to force exit from the wait and
 			 * do a direct post of the IPI.
 			 */
-			if (cpu_wait == r4k_wait_irqoff) {
-				tcrestart = read_tc_c0_tcrestart();
-				if (address_is_in_r4k_wait_irqoff(tcrestart)) {
-					write_tc_c0_tcrestart(__pastwait);
-					tcstatus &= ~TCSTATUS_IXMT;
-					write_tc_c0_tcstatus(tcstatus);
-					goto postdirect;
-				}
+#ifdef CONFIG_CPU_HAS_WAITOFF
+			tcrestart = read_tc_c0_tcrestart();
+			if (address_is_in_r4k_wait_irqoff(tcrestart)) {
+				write_tc_c0_tcrestart(__pastwait);
+				tcstatus &= ~TCSTATUS_IXMT;
+				write_tc_c0_tcstatus(tcstatus);
+				goto postdirect;
 			}
+#endif
 			/*
 			 * Otherwise we queue the message for the target TC
 			 * to pick up when he does a local_irq_restore()

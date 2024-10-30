@@ -358,4 +358,6 @@ config VMXNET3
 
 source "drivers/net/hyperv/Kconfig"
 
+source "drivers/net/rtl819x/Kconfig"
+
 endif # NETDEVICES

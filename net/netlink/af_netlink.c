@@ -3001,3 +3001,270 @@ panic:
 }
 
 core_initcall(netlink_proto_init);
+
+#if defined(CONFIG_RTL_819X)
+int rtk_nlrecvmsg(struct sk_buff *skb,int _len, void *_recv_data)
+{
+	int pid;
+//	struct sk_buff *skb;
+  	struct nlmsghdr *nlh;
+	
+	pid=0;
+//  	printk("net_link: data is ready to read.\n");
+  	//skb = skb_get(_skb);
+	
+	if (skb->len >= NLMSG_SPACE(0)) {
+    		nlh = nlmsg_hdr(skb);
+		memcpy(_recv_data,NLMSG_DATA(nlh),_len);
+    		pid = nlh->nlmsg_pid; /*pid of sending process */
+//    		printk("net_link: pid is %d\n", pid);    		
+		//kfree_skb(skb);	
+		return pid;
+  	}
+	else
+	{
+		//kfree_skb(skb);	
+		return -1;
+	}
+}
+EXPORT_SYMBOL(rtk_nlrecvmsg);
+
+int rtk_nlsendmsg (int _pid,struct sock *_nl_sk,int _len,void *_send_info) 
+{
+        struct nlmsghdr *nlh;
+        struct sk_buff *skb;
+        int rc;
+        int len;
+
+	 len = NLMSG_SPACE(_len+sizeof(struct nlmsghdr)+32);
+ 
+        skb = alloc_skb(len, GFP_ATOMIC);
+        if (!skb){
+                printk(KERN_ERR "net_link: allocate failed.\n");
+                return -1;
+        }
+        nlh = nlmsg_put(skb,0,0,0,len,0);
+        NETLINK_CB(skb).portid = 0; /* from kernel */
+ 
+        memcpy(NLMSG_DATA(nlh), _send_info, _len);
+//        printk("net_link: going to send.\n");
+        rc = netlink_unicast(_nl_sk, skb, _pid, MSG_DONTWAIT);
+        if (rc < 0) {
+                printk(KERN_ERR "net_link: can not unicast skb (%d)\n", rc);
+        }
+//        printk("net_link: send to %d is ok.\n",_pid);
+        return 0;
+}
+EXPORT_SYMBOL(rtk_nlsendmsg);
+
+
+#if defined(CONFIG_RTK_WLAN_EVENT_INDICATE) || defined (CONFIG_AUTO_DHCP_CHECK)
+static int rtk_eventd_pid=0;
+static struct sock * nl_eventd_sk=NULL;
+#define MAX_PAYLOAD 1024
+
+typedef struct __rtkEventHdr 
+{
+	int eventID;	
+	char name[16];
+	unsigned char data[0];
+}rtkEventHdr;
+
+#define RTK_EVENTD_HDR_LEN sizeof(rtkEventHdr)
+
+void rtk_eventd_netlink_receive(struct sk_buff *puskb)
+{
+	//int		pid;
+	rtkEventHdr * pEventdHdr=NULL;
+	char msgBuf[1024];
+	
+	rtk_eventd_pid = rtk_nlrecvmsg(puskb, sizeof(msgBuf), msgBuf);
+	if(rtk_eventd_pid<1)
+	{
+		return;
+	}
+	
+	pEventdHdr=(rtkEventHdr *)msgBuf;
+	
+	//panic_printk("%s:%d##pid=%d\n",__FUNCTION__,__LINE__,rtk_eventd_pid);
+	//panic_printk("%s:%d##eventID=%d\n",__FUNCTION__,__LINE__,pEventdHdr->eventID);
+	//panic_printk("%s:%d##msg=%s\n",__FUNCTION__,__LINE__,pEventdHdr->data);
+	
+  	return;
+}
+EXPORT_SYMBOL(rtk_eventd_netlink_receive);
+
+int get_nl_eventd_pid(void)
+{
+	return rtk_eventd_pid;
+}
+EXPORT_SYMBOL(get_nl_eventd_pid);
+
+struct sock *get_nl_eventd_sk(void)
+{
+	return nl_eventd_sk;
+}
+EXPORT_SYMBOL(get_nl_eventd_sk);
+
+
+
+void rtk_eventd_netlink_send(int pid, struct sock *nl_sk, int eventID, char *ifname, char *data, int data_len)
+{
+	struct nlmsghdr *nlh;
+	struct sk_buff *skb;
+	int rc, len;
+	
+	rtkEventHdr *pEventdHdr=NULL;
+	char msgBuf[128];
+	memset(msgBuf, 0, sizeof(msgBuf));
+	pEventdHdr=(rtkEventHdr *)msgBuf;
+	pEventdHdr->eventID=eventID;
+	
+	if(ifname!=NULL)
+	{
+		strcpy(pEventdHdr->name, ifname);
+	}
+	
+	memcpy(pEventdHdr->data, data,data_len);	
+	
+	//if(data_len>MAX_OPENVPN_PAYLOAD)
+	//{
+	//	printk("%s:%d##date len is too long!\n",__FUNCTION__,__LINE__);
+	//	return;
+	//}
+	
+	if(data_len > MAX_PAYLOAD - RTK_EVENTD_HDR_LEN)
+	{
+		//panic_printk("%s:%d##date len is too long!\n",__FUNCTION__,__LINE__);
+		printk("%s:%d##date len is too long!\n",__FUNCTION__,__LINE__);
+		return;
+	}
+	
+	len = NLMSG_SPACE(MAX_PAYLOAD-NLMSG_HDRLEN);
+	//len = NLMSG_SPACE(MAX_PAYLOAD-RTK_EVENTD_HDR_LEN);
+
+	skb = alloc_skb(len, GFP_ATOMIC);
+	if(!skb)
+	{
+		printk(KERN_ERR "net_link: allocate failed.\n");
+		return;
+	}
+	
+	nlh = nlmsg_put(skb,0,0,0,len,0);
+
+	if(nlh==NULL)
+	{
+		printk("data_len=%d len=%d nlh is NULL!\n\n", data_len, len);
+	}
+	
+	NETLINK_CB(skb).portid = 0; /* from kernel */
+
+	//memcpy(NLMSG_DATA(nlh), data, data_len);
+	memcpy(NLMSG_DATA(nlh), pEventdHdr, data_len+sizeof(rtkEventHdr));
+	
+	nlh->nlmsg_len=data_len+sizeof(rtkEventHdr)+NLMSG_HDRLEN;
+	
+	rc = netlink_unicast(nl_sk, skb, pid, MSG_DONTWAIT);
+	
+	if (rc < 0)
+	{
+		printk(KERN_ERR "net_link: can not unicast skb (%d)\n", rc);
+	}
+
+	return;
+}
+EXPORT_SYMBOL(rtk_eventd_netlink_send);
+
+void rtk_eventd_netlink_send_multicast(int pid, struct sock *nl_sk, int eventID, char *ifname, char *data, int data_len)
+{
+	struct nlmsghdr *nlh;
+	struct sk_buff *skb;
+	int rc, len;
+	#define Rtk_Event_Netlink_Group (1<<0)
+	
+	rtkEventHdr *pEventdHdr=NULL;
+	char msgBuf[128];
+	memset(msgBuf, 0, sizeof(msgBuf));
+	pEventdHdr=(rtkEventHdr *)msgBuf;
+	pEventdHdr->eventID=eventID;
+
+	//#define Rtk_Event_Netlink_Group (1<<8)
+	
+	if(ifname!=NULL)
+	{
+		strcpy(pEventdHdr->name, ifname);
+	}
+	
+	strcpy(pEventdHdr->data, data);	
+	
+	//if(data_len>MAX_OPENVPN_PAYLOAD)
+	//{
+	//	printk("%s:%d##date len is too long!\n",__FUNCTION__,__LINE__);
+	//	return;
+	//}
+	
+	if(data_len > MAX_PAYLOAD - RTK_EVENTD_HDR_LEN)
+	{
+		//panic_printk("%s:%d##date len is too long!\n",__FUNCTION__,__LINE__);
+		printk("%s:%d##date len is too long!\n",__FUNCTION__,__LINE__);
+		return;
+	}
+	
+	len = NLMSG_SPACE(MAX_PAYLOAD-NLMSG_HDRLEN);
+	//len = NLMSG_SPACE(MAX_PAYLOAD-RTK_EVENTD_HDR_LEN);
+
+	skb = alloc_skb(len, GFP_ATOMIC);
+	if(!skb)
+	{
+		printk(KERN_ERR "net_link: allocate failed.\n");
+		return;
+	}
+	
+	nlh = nlmsg_put(skb,0,0,0,len,0);
+
+	if(nlh==NULL)
+	{
+		printk("data_len=%d len=%d nlh is NULL!\n\n", data_len, len);
+	}
+	
+	NETLINK_CB(skb).portid = 0; /* from kernel */
+       /* to mcast group 1<<0 */  
+       NETLINK_CB(skb).dst_group = Rtk_Event_Netlink_Group;
+
+	//memcpy(NLMSG_DATA(nlh), data, data_len);
+	memcpy(NLMSG_DATA(nlh), pEventdHdr, data_len+sizeof(rtkEventHdr));
+	
+	nlh->nlmsg_len=data_len+sizeof(rtkEventHdr)+NLMSG_HDRLEN;
+	
+	rc = netlink_broadcast(nl_sk, skb, 0, 1, GFP_KERNEL);
+	
+	if (rc < 0)
+	{
+		printk(KERN_ERR "net_link: can not multicast skb (%d)\n", rc);
+	}
+
+	return;
+}
+EXPORT_SYMBOL(rtk_eventd_netlink_send_multicast);
+
+struct sock * rtk_eventd_netlink_init(void) 
+{
+	struct netlink_kernel_cfg cfg={
+		.input=rtk_eventd_netlink_receive,
+	};
+
+	nl_eventd_sk = netlink_kernel_create(&init_net, NETLINK_RTK_EVENTD, &cfg);
+  	//nl_eventd_sk = netlink_kernel_create(&init_net, NETLINK_RTK_EVENTD, 0, rtk_eventd_netlink_receive, NULL, THIS_MODULE);
+
+  	if (!nl_eventd_sk) 
+	{
+    		//panic_printk(KERN_ERR "kernel create eventd netlink socket fail!\n");
+    		printk(KERN_ERR "kernel create eventd netlink socket fail!\n");
+  	}
+  	return nl_eventd_sk;
+}
+EXPORT_SYMBOL(rtk_eventd_netlink_init);
+#endif
+#endif
+
+

@@ -155,6 +155,14 @@ config MTD_BCM47XX_PARTS
 	  This provides partitions parser for devices based on BCM47xx
 	  boards.
 
+config MTD_RTKXX_PARTS
+	tristate "RTKXX partitioning support"
+	depends on RTL_819X 
+	default y
+	help 
+      This provides partitions parser for devices based on rtkxx
+      boards.
+
 comment "User Modules And Translation Layers"
 
 config MTD_BLKDEVS

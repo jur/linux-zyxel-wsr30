@@ -15,6 +15,7 @@
  * binaries.
  */
 #include <linux/compiler.h>
+#include <linux/context_tracking.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -102,6 +103,7 @@ int ptrace_setregs(struct task_struct *child, __s64 __user *data)
 	return 0;
 }
 
+#ifdef CONFIG_CPU_HAS_FPU
 int ptrace_getfpregs(struct task_struct *child, __u32 __user *data)
 {
 	int i;
@@ -167,7 +169,34 @@ int ptrace_setfpregs(struct task_struct *child, __u32 __user *data)
 
 	return 0;
 }
+#else
+int ptrace_getfpregs(struct task_struct *child, __u32 __user *data)
+{
+	int i;
 
+	if (!access_ok(VERIFY_WRITE, data, 33 * 8))
+		return -EIO;
+
+	for (i = 0; i < 32; i++)
+		__put_user((__u64) -1, i + (__u64 __user *) data);
+
+	__put_user(0, data + 64);
+	__put_user(0, data + 65);
+
+	return 0;
+}
+
+int ptrace_setfpregs(struct task_struct *child, __u32 __user *data)
+{
+	if (!access_ok(VERIFY_READ, data, 33 * 8))
+		return -EIO;
+
+	return 0;
+}
+#endif
+
+
+#ifdef CONFIG_CPU_HAS_WATCH
 int ptrace_get_watch_regs(struct task_struct *child,
 			  struct pt_watch_regs __user *addr)
 {
@@ -254,12 +283,15 @@ int ptrace_set_watch_regs(struct task_struct *child,
 
 	return 0;
 }
+#endif
 
 long arch_ptrace(struct task_struct *child, long request,
 		 unsigned long addr, unsigned long data)
 {
 	int ret;
+#ifdef CONFIG_CPU_HAS_WATCH
 	void __user *addrp = (void __user *) addr;
+#endif
 	void __user *datavp = (void __user *) data;
 	unsigned long __user *datalp = (void __user *) data;
 
@@ -283,6 +315,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			tmp = regs->regs[addr];
 			break;
 		case FPR_BASE ... FPR_BASE + 31:
+#ifdef CONFIG_CPU_HAS_FPU
 			if (tsk_used_math(child)) {
 				fpureg_t *fregs = get_fpu_regs(child);
 
@@ -303,6 +336,9 @@ long arch_ptrace(struct task_struct *child, long request,
 			} else {
 				tmp = -1;	/* FP not yet used  */
 			}
+#else
+			tmp = -1;	/* FP not yet used  */
+#endif
 			break;
 		case PC:
 			tmp = regs->cp0_epc;
@@ -325,9 +361,14 @@ long arch_ptrace(struct task_struct *child, long request,
 			break;
 #endif
 		case FPC_CSR:
+#ifdef CONFIG_CPU_HAS_FPU
 			tmp = child->thread.fpu.fcr31;
+#else
+			tmp = 0;
+#endif
 			break;
 		case FPC_EIR: { /* implementation / version register */
+#ifdef CONFIG_CPU_HAS_FPU
 			unsigned int flags;
 #ifdef CONFIG_MIPS_MT_SMTC
 			unsigned long irqflags;
@@ -363,8 +404,10 @@ long arch_ptrace(struct task_struct *child, long request,
 			local_irq_restore(irqflags);
 #endif /* CONFIG_MIPS_MT_SMTC */
 			preempt_enable();
+#endif
 			break;
 		}
+#ifdef CONFIG_CPU_HAS_DSP
 		case DSP_BASE ... DSP_BASE + 5: {
 			dspreg_t *dregs;
 
@@ -385,6 +428,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			}
 			tmp = child->thread.dsp.dspcontrol;
 			break;
+#endif
 		default:
 			tmp = 0;
 			ret = -EIO;
@@ -410,6 +454,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			regs->regs[addr] = data;
 			break;
 		case FPR_BASE ... FPR_BASE + 31: {
+#ifdef CONFIG_CPU_HAS_FPU
 			fpureg_t *fregs = get_fpu_regs(child);
 
 			if (!tsk_used_math(child)) {
@@ -435,6 +480,7 @@ long arch_ptrace(struct task_struct *child, long request,
 #ifdef CONFIG_64BIT
 			fregs[addr - FPR_BASE] = data;
 #endif
+#endif
 			break;
 		}
 		case PC:
@@ -452,8 +498,11 @@ long arch_ptrace(struct task_struct *child, long request,
 			break;
 #endif
 		case FPC_CSR:
+#ifdef CONFIG_CPU_HAS_FPU
 			child->thread.fpu.fcr31 = data & ~FPU_CSR_ALL_X;
+#endif
 			break;
+#ifdef CONFIG_CPU_HAS_DSP
 		case DSP_BASE ... DSP_BASE + 5: {
 			dspreg_t *dregs;
 
@@ -473,6 +522,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			}
 			child->thread.dsp.dspcontrol = data;
 			break;
+#endif
 		default:
 			/* The rest are not allowed. */
 			ret = -EIO;
@@ -501,6 +551,7 @@ long arch_ptrace(struct task_struct *child, long request,
 		ret = put_user(task_thread_info(child)->tp_value, datalp);
 		break;
 
+#ifdef CONFIG_CPU_HAS_WATCH
 	case PTRACE_GET_WATCH_REGS:
 		ret = ptrace_get_watch_regs(child, addrp);
 		break;
@@ -508,6 +559,7 @@ long arch_ptrace(struct task_struct *child, long request,
 	case PTRACE_SET_WATCH_REGS:
 		ret = ptrace_set_watch_regs(child, addrp);
 		break;
+#endif
 
 	default:
 		ret = ptrace_request(child, request, addr, data);
@@ -535,6 +587,8 @@ static inline int audit_arch(void)
  */
 asmlinkage void syscall_trace_enter(struct pt_regs *regs)
 {
+	user_exit();
+
 	/* do the secure computing check first */
 	secure_computing_strict(regs->regs[2]);
 
@@ -571,6 +625,13 @@ out:
  */
 asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 {
+        /*
+	 * We may come here right after calling schedule_user()
+	 * or do_notify_resume(), in which case we can be in RCU
+	 * user mode.
+	 */
+	user_exit();
+
 	audit_syscall_exit(regs);
 
 	if (!(current->ptrace & PT_PTRACED))
@@ -593,4 +654,6 @@ asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 		send_sig(current->exit_code, current, 1);
 		current->exit_code = 0;
 	}
+
+	user_enter();
 }

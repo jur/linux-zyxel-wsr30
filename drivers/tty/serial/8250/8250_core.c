@@ -16,7 +16,8 @@
  *  membase is an 'ioremapped' cookie.
  */
 
-#if defined(CONFIG_SERIAL_8250_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
+#define CONFIG_SERIAL_8250_SYSRQ
+#if defined(CONFIG_SERIAL_8250_SYSRQ) && defined(CONFIG_MAGIC_SYSRQ)
 #define SUPPORT_SYSRQ
 #endif
 
@@ -161,7 +162,11 @@ static const struct serial8250_config uart_config[] = {
 		.fifo_size	= 16,
 		.tx_loadsz	= 16,
 		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_10,
+#if defined(CONFIG_SERIAL_RTL_UART1)||defined(CONFIG_SERIAL_RTL_UART2)
+		.flags		= UART_CAP_FIFO | UART_CAP_AFE,
+#else
 		.flags		= UART_CAP_FIFO,
+#endif
 	},
 	[PORT_CIRRUS] = {
 		.name		= "Cirrus",
@@ -1833,7 +1838,6 @@ static void serial8250_set_mctrl(struct uart_port *port, unsigned int mctrl)
 		mcr |= UART_MCR_LOOP;
 
 	mcr = (mcr & up->mcr_mask) | up->mcr_force | up->mcr;
-
 	serial_port_out(port, UART_MCR, mcr);
 }
 
@@ -2259,8 +2263,12 @@ static unsigned int serial8250_get_divisor(struct uart_port *port, unsigned int 
 	else if ((port->flags & UPF_MAGIC_MULTIPLIER) &&
 		 baud == (port->uartclk/8))
 		quot = 0x8002;
-	else
+	else {
 		quot = uart_get_divisor(port, baud);
+#if defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_8197F)
+		quot--;
+#endif
+	}	
 
 	return quot;
 }
@@ -2336,7 +2344,11 @@ serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
 	 * have sufficient FIFO entries for the latency of the remote
 	 * UART to respond.  IOW, at least 32 bytes of FIFO.
 	 */
-	if (up->capabilities & UART_CAP_AFE && port->fifosize >= 32) {
+#if defined(CONFIG_SERIAL_RTL_UART1)||defined(CONFIG_SERIAL_RTL_UART2)
+	if (up->capabilities & UART_CAP_AFE && up->port.fifosize >= 16) {
+#else
+	if (up->capabilities & UART_CAP_AFE && up->port.fifosize >= 32) {
+#endif
 		up->mcr &= ~UART_MCR_AFE;
 		if (termios->c_cflag & CRTSCTS)
 			up->mcr |= UART_MCR_AFE;
@@ -2768,7 +2780,7 @@ static void __init serial8250_isa_init_ports(void)
 
 		init_timer(&up->timer);
 		up->timer.function = serial8250_timeout;
-		up->cur_iotype = 0xFF;
+			up->cur_iotype = 0xFF;
 
 		/*
 		 * ALPHA_KLUDGE_MCR needs to be killed.

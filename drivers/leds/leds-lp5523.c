@@ -34,6 +34,9 @@
 
 #include "leds-lp55xx-common.h"
 
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+#define LP5523_PROGRAM_PAGES		6
+#endif
 #define LP5523_PROGRAM_LENGTH		32
 #define LP5523_MAX_LEDS			9
 
@@ -49,6 +52,11 @@
 #define LP5523_REG_RESET		0x3D
 #define LP5523_REG_LED_TEST_CTRL	0x41
 #define LP5523_REG_LED_TEST_ADC		0x42
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+#define LP5523_REG_ENG1_START_ADDR	0x4C
+#define LP5523_REG_ENG2_START_ADDR	0x4D
+#define LP5523_REG_ENG3_START_ADDR	0x4E
+#endif
 #define LP5523_REG_PROG_PAGE_SEL	0x4F
 #define LP5523_REG_PROG_MEM		0x50
 
@@ -139,6 +147,36 @@ static int lp5523_post_init_device(struct lp55xx_chip *chip)
 
 static void lp5523_load_engine(struct lp55xx_chip *chip)
 {
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	unsigned int eng_start_addr = chip->pdata->eng_start_addr;
+	u8 mask = 0;
+	u8 val = 0;
+
+	// always enable eng1
+	mask |= LP5523_MODE_ENG1_M;
+	val |= LP5523_LOAD_ENG1;
+	lp55xx_write(chip, LP5523_REG_ENG1_START_ADDR, (eng_start_addr & 0xFF));
+	//printk(KERN_INFO "lp5523_load_engine eng1_addr = %X\n", (eng_start_addr & 0xFF));
+
+	if ((eng_start_addr >> 8) & 0xFF) {
+		mask |= LP5523_MODE_ENG2_M;
+		val |= LP5523_LOAD_ENG2;
+		lp55xx_write(chip, LP5523_REG_ENG2_START_ADDR, ((eng_start_addr >> 8) & 0xFF));
+		//printk(KERN_INFO "lp5523_load_engine eng2_addr = %X\n", ((eng_start_addr >> 8) & 0xFF));
+	}
+
+	if ((eng_start_addr >> 16) & 0xFF) {
+		mask |= LP5523_MODE_ENG3_M;
+		val |= LP5523_LOAD_ENG3;
+		lp55xx_write(chip, LP5523_REG_ENG3_START_ADDR, ((eng_start_addr >> 16) & 0xFF));
+		//printk(KERN_INFO "lp5523_load_engine eng3_addr = %X\n", ((eng_start_addr >> 16) & 0xFF));
+	}
+
+	//printk(KERN_INFO "lp5523_load_engine mask = %X, val = %X\n", mask, val);
+	lp55xx_update_bits(chip, LP5523_REG_OP_MODE, mask, val);
+
+	lp5523_wait_opmode_done();
+#else
 	enum lp55xx_engine_index idx = chip->engine_idx;
 	u8 mask[] = {
 		[LP55XX_ENGINE_1] = LP5523_MODE_ENG1_M,
@@ -163,6 +201,7 @@ static void lp5523_load_engine(struct lp55xx_chip *chip)
 	lp5523_wait_opmode_done();
 
 	lp55xx_write(chip, LP5523_REG_PROG_PAGE_SEL, page_sel[idx]);
+#endif
 }
 
 static void lp5523_stop_engine(struct lp55xx_chip *chip)
@@ -230,7 +269,11 @@ static void lp5523_run_engine(struct lp55xx_chip *chip, bool start)
 static int lp5523_update_program_memory(struct lp55xx_chip *chip,
 					const u8 *data, size_t size)
 {
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	u8 pattern[LP5523_PROGRAM_LENGTH * LP5523_PROGRAM_PAGES] = {0};
+#else
 	u8 pattern[LP5523_PROGRAM_LENGTH] = {0};
+#endif
 	unsigned cmd;
 	char c[3];
 	int update_size;
@@ -240,11 +283,24 @@ static int lp5523_update_program_memory(struct lp55xx_chip *chip,
 	int i;
 
 	/* clear program memory before updating */
+	#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	int j;
+	for (j = 0; j < LP5523_PROGRAM_PAGES; j++) {
+		lp55xx_write(chip, LP5523_REG_PROG_PAGE_SEL, j);
+		for (i = 0; i < LP5523_PROGRAM_LENGTH; i++)
+			lp55xx_write(chip, LP5523_REG_PROG_MEM + i, 0);
+	}
+	#else
 	for (i = 0; i < LP5523_PROGRAM_LENGTH; i++)
 		lp55xx_write(chip, LP5523_REG_PROG_MEM + i, 0);
+	#endif
 
 	i = 0;
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	while ((offset < size - 1) && (i < LP5523_PROGRAM_LENGTH*LP5523_PROGRAM_PAGES*2)) {
+#else
 	while ((offset < size - 1) && (i < LP5523_PROGRAM_LENGTH)) {
+#endif
 		/* separate sscanfs because length is working only for %s */
 		ret = sscanf(data + offset, "%2s%n ", c, &nrchars);
 		if (ret != 1)
@@ -264,8 +320,25 @@ static int lp5523_update_program_memory(struct lp55xx_chip *chip,
 		goto err;
 
 	update_size = i;
+	#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	j = 0;
+	//printk(KERN_INFO "lp5523_update_program_memory\n");
+	//printk(KERN_INFO "LP5523_REG_PROG_PAGE_SEL %X %d\n", LP5523_REG_PROG_PAGE_SEL, j);
+	lp55xx_write(chip, LP5523_REG_PROG_PAGE_SEL, j);
+	for (i = 0; i < update_size; i++) {
+		if ( (i > 0)  && !(i % LP5523_PROGRAM_LENGTH)) {
+			j++;
+			if ( j == LP5523_PROGRAM_PAGES ) break;
+			//printk(KERN_INFO "LP5523_REG_PROG_PAGE_SEL %X %d\n", LP5523_REG_PROG_PAGE_SEL, j);
+			lp55xx_write(chip, LP5523_REG_PROG_PAGE_SEL, j);
+		}
+		//printk(KERN_INFO "%X %X\n", LP5523_REG_PROG_MEM + (i - j*LP5523_PROGRAM_LENGTH), pattern[i]);
+		lp55xx_write(chip, LP5523_REG_PROG_MEM + (i - j*LP5523_PROGRAM_LENGTH), pattern[i]);
+	}
+	#else
 	for (i = 0; i < update_size; i++)
 		lp55xx_write(chip, LP5523_REG_PROG_MEM + i, pattern[i]);
+	#endif
 
 	return 0;
 
@@ -278,7 +351,11 @@ static void lp5523_firmware_loaded(struct lp55xx_chip *chip)
 {
 	const struct firmware *fw = chip->fw;
 
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	if (fw->size > (LP5523_PROGRAM_LENGTH * LP5523_PROGRAM_PAGES *2)) {
+#else
 	if (fw->size > LP5523_PROGRAM_LENGTH) {
+#endif
 		dev_err(&chip->cl->dev, "firmware data size overflow: %zu\n",
 			fw->size);
 		return;
@@ -393,10 +470,139 @@ static void lp5523_led_brightness_work(struct work_struct *work)
 	mutex_unlock(&chip->lock);
 }
 
+#if defined(CONFIG_LEDS_LP5523_PREDEFINED_PATTERNS)
+static inline bool _is_pc_overflow(struct lp55xx_predef_pattern *ptn)
+{
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	return (ptn->size_r >= (LP5523_PROGRAM_LENGTH * LP5523_PROGRAM_PAGES));
+#else
+	return (ptn->size_r >= LP5523_PROGRAM_LENGTH ||
+		ptn->size_g >= LP5523_PROGRAM_LENGTH ||
+		ptn->size_b >= LP5523_PROGRAM_LENGTH);
+#endif
+}
+
+#define LP5523_PATTERN_OFF 0
+static int lp5523_run_predef_led_pattern(struct lp55xx_chip *chip, int mode)
+{
+	struct lp55xx_predef_pattern *ptn;
+	int i;
+
+	lp5523_run_engine(chip, false);
+	if (mode == LP5523_PATTERN_OFF) {
+		return 0;
+	}
+
+	ptn = chip->pdata->patterns + (mode - 1);
+	if (!ptn || _is_pc_overflow(ptn)) {
+		dev_err(&chip->cl->dev, "invalid pattern data\n");
+		return -EINVAL;
+	}
+
+	// alwayse use engine1
+	chip->engine_idx = LP55XX_ENGINE_1;
+	#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	chip->pdata->eng_start_addr = ptn->eng_start_addr;
+	#endif
+	lp5523_load_engine(chip);
+	#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	int j = 0;
+	//printk(KERN_INFO "lp5523_run_predef_led_pattern\n");
+	//printk(KERN_INFO "LP5523_REG_PROG_PAGE_SEL %X %d\n", LP5523_REG_PROG_PAGE_SEL, j);
+	lp55xx_write(chip, LP5523_REG_PROG_PAGE_SEL, j);
+	for (i = 0; i < ptn->size_r; i++) {
+		if ( (i > 0)  && !(i % LP5523_PROGRAM_LENGTH)) {
+			j++;
+			if ( j == LP5523_PROGRAM_PAGES ) break;
+			//printk(KERN_INFO "LP5523_REG_PROG_PAGE_SEL %X %d\n", LP5523_REG_PROG_PAGE_SEL, j);
+			lp55xx_write(chip, LP5523_REG_PROG_PAGE_SEL, j);
+		}
+		//printk(KERN_INFO "%X %X\n", LP5523_REG_PROG_MEM + (i - j*LP5523_PROGRAM_LENGTH), ptn->r[i]);
+		lp55xx_write(chip, LP5523_REG_PROG_MEM + (i - j*LP5523_PROGRAM_LENGTH), ptn->r[i]);
+	}
+	#else
+	for (i = 0; i<ptn->size_r; i++)
+		lp55xx_write(chip, LP5523_REG_PROG_MEM + i, ptn->r[i]);
+	#endif
+
+	/* Run engines */
+	lp5523_run_engine(chip, true);
+
+	return 0;
+}
+
+static ssize_t lp5523_store_pattern(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t len)
+{
+	struct lp55xx_led *led = i2c_get_clientdata(to_i2c_client(dev));
+	struct lp55xx_chip *chip = led->chip;
+	struct lp55xx_predef_pattern *ptn = chip->pdata->patterns;
+	int num_patterns = chip->pdata->num_patterns;
+	unsigned long mode;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &mode);
+	if (ret)
+		return ret;
+
+	if (mode > num_patterns || !ptn)
+		return -EINVAL;
+
+	mutex_lock(&chip->lock);
+	ret = lp5523_run_predef_led_pattern(chip, mode);
+	mutex_unlock(&chip->lock);
+
+	if (ret)
+		return ret;
+
+	return len;
+}
+
+static DEVICE_ATTR(led_pattern, S_IWUSR, NULL, lp5523_store_pattern);
+#endif // LEDS_LP5523_PREDEFINED_PATTERNS
+
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+static ssize_t lp5523_show_eng_start_addr(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct lp55xx_led *led = i2c_get_clientdata(to_i2c_client(dev));
+	struct lp55xx_chip *chip = led->chip;
+
+	return sprintf(buf, "0x%X\n", chip->pdata->eng_start_addr);
+}
+
+static ssize_t lp5523_store_eng_start_addr(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t len)
+{
+	struct lp55xx_led *led = i2c_get_clientdata(to_i2c_client(dev));
+	struct lp55xx_chip *chip = led->chip;
+	unsigned int addr;
+	int ret;
+
+	ret = kstrtoul(buf, 16, &addr);
+	if (ret)
+		return ret;
+
+	chip->pdata->eng_start_addr = addr;
+
+	return len;
+}
+static DEVICE_ATTR(eng_start_addr, S_IRUGO | S_IWUSR, lp5523_show_eng_start_addr, lp5523_store_eng_start_addr);
+#endif // LEDS_LP5523_EXTENDED_FW
+
 static DEVICE_ATTR(selftest, S_IRUGO, lp5523_selftest, NULL);
 
 static struct attribute *lp5523_attributes[] = {
 	&dev_attr_selftest.attr,
+#if defined(CONFIG_LEDS_LP5523_PREDEFINED_PATTERNS)
+	&dev_attr_led_pattern.attr,
+#endif
+#if defined(CONFIG_LEDS_LP5523_EXTENDED_FW)
+	&dev_attr_eng_start_addr.attr,
+#endif
 	NULL,
 };
 
@@ -415,7 +621,9 @@ static struct lp55xx_device_config lp5523_cfg = {
 		.val  = LP5523_ENABLE,
 	},
 	.max_channel  = LP5523_MAX_LEDS,
+#if !defined(CONFIG_LEDS_LP55XX_COMMON_DISABLE_RESET_AND_ENABLE)
 	.post_init_device   = lp5523_post_init_device,
+#endif
 	.brightness_work_fn = lp5523_led_brightness_work,
 	.set_led_current    = lp5523_set_led_current,
 	.firmware_cb        = lp5523_firmware_loaded,

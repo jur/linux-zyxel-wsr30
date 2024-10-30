@@ -978,7 +978,7 @@ static void usb_deregister_bus (struct usb_bus *bus)
  * to register the usb device.  It also assigns the root hub's USB address
  * (always 1).
  */
-static int register_root_hub(struct usb_hcd *hcd)
+ int register_root_hub(struct usb_hcd *hcd)
 {
 	struct device *parent_dev = hcd->self.controller;
 	struct usb_device *usb_dev = hcd->self.root_hub;

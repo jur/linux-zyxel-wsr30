@@ -31,9 +31,45 @@
 #include <net/netfilter/nf_log.h>
 #include "../../netfilter/xt_repldata.h"
 
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+#include <net/rtl/rtl865x_netif.h>
+#include <net/rtl/rtl865x_outputQueue.h>
+#define	RTL865X_QOS_TABLE_NAME		"mangle"
+#define	RTL865X_QOS_TABLE_LEN			6
+#endif
+
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl865x_netif.h>
+#endif
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
 MODULE_DESCRIPTION("IPv4 packet filter");
+
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+typedef struct xt_rule_to_acl_s
+{
+	struct list_head list;
+	char iniface[IFNAMSIZ], outiface[IFNAMSIZ];
+	rtl865x_AclRule_t *aclRule;
+} xt_rule_to_acl_t;
+
+LIST_HEAD(rtl865x_iptRule2Acl_tbl_list);
+LIST_HEAD(rtl865x_iptRule2Acl_def_rule_list);
+
+static unsigned int in_def_action = RTL865X_ACL_PERMIT;
+static unsigned int out_def_action = RTL865X_ACL_PERMIT;
+int establish_rule_permit = 0;
+
+extern int get_hookNum(struct ipt_entry *e, unsigned char *base, const unsigned int valid_hooks,const unsigned int *hook_entries);
+
+#endif
+
 
 /*#define DEBUG_IP_FIREWALL*/
 /*#define DEBUG_ALLOW_ALL*/ /* Useful for remote debugging */
@@ -75,6 +111,9 @@ static inline bool
 ip_packet_match(const struct iphdr *ip,
 		const char *indev,
 		const char *outdev,
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+		char *switch_port,
+#endif
 		const struct ipt_ip *ipinfo,
 		int isfrag)
 {
@@ -99,7 +138,18 @@ ip_packet_match(const struct iphdr *ip,
 
 	ret = ifname_compare_aligned(indev, ipinfo->iniface, ipinfo->iniface_mask);
 
-	if (FWINV(ret != 0, IPT_INV_VIA_IN)) {
+//jwj:use switch port dev to set skb->mark, then use skb->mark to decide route table
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	if (switch_port == NULL) 
+		switch_port = "";
+#endif
+
+	if (
+		FWINV(ret != 0, IPT_INV_VIA_IN)
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+	      && (strcmp(switch_port, ipinfo->iniface) != 0)
+#endif
+		) {
 		dprintf("VIA in mismatch (%s vs %s).%s\n",
 			indev, ipinfo->iniface,
 			ipinfo->invflags&IPT_INV_VIA_IN ?" (INV)":"");
@@ -158,6 +208,26 @@ ipt_error(struct sk_buff *skb, const struct xt_action_param *par)
 
 	return NF_DROP;
 }
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static struct xt_target ipt_builtin_tg[] __read_mostly = {
+	{
+		.name             = XT_STANDARD_TARGET,
+		.targetsize       = sizeof(int),
+		.family           = NFPROTO_IPV4,
+#ifdef CONFIG_COMPAT
+		.compatsize       = sizeof(compat_int_t),
+		.compat_from_user = compat_standard_from_user,
+		.compat_to_user   = compat_standard_to_user,
+#endif
+	},
+	{
+		.name             = XT_ERROR_TARGET,
+		.target           = ipt_error,
+		.targetsize       = XT_FUNCTION_MAXNAMELEN,
+		.family           = NFPROTO_IPV4,
+	},
+};
+#endif
 
 /* Performance critical */
 static inline struct ipt_entry *
@@ -183,7 +253,8 @@ ipt_get_target_c(const struct ipt_entry *e)
 	return ipt_get_target((struct ipt_entry *)e);
 }
 
-#if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE)
+#define CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL 1
+#if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE) || defined(CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL)
 static const char *const hooknames[] = {
 	[NF_INET_PRE_ROUTING]		= "PREROUTING",
 	[NF_INET_LOCAL_IN]		= "INPUT",
@@ -204,6 +275,7 @@ static const char *const comments[] = {
 	[NF_IP_TRACE_COMMENT_POLICY]	= "policy",
 };
 
+#if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE)
 static struct nf_loginfo trace_loginfo = {
 	.type = NF_LOG_TYPE_LOG,
 	.u = {
@@ -213,6 +285,7 @@ static struct nf_loginfo trace_loginfo = {
 		},
 	},
 };
+#endif
 
 /* Mildly perf critical (only if packet tracing is on) */
 static inline int
@@ -246,6 +319,7 @@ get_chainname_rulenum(const struct ipt_entry *s, const struct ipt_entry *e,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE)
 static void trace_packet(const struct sk_buff *skb,
 			 unsigned int hook,
 			 const struct net_device *in,
@@ -276,6 +350,36 @@ static void trace_packet(const struct sk_buff *skb,
 		      "TRACE: %s:%s:%s:%u ",
 		      tablename, chainname, comment, rulenum);
 }
+#endif
+
+#if defined(CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL)&&defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static void rtl_getChainName(unsigned int hook,
+			 const char *tablename,
+			 struct xt_table_info *private,
+			 struct ipt_entry *e,
+			 char **chainName)
+{
+	void *table_base;
+	const struct ipt_entry *root;
+	char *hookname, *comment;
+	const struct ipt_entry *iter;
+	unsigned int rulenum = 0;
+
+	table_base = (void *)private->entries[smp_processor_id()];
+	root = get_entry(table_base, private->hook_entry[hook]);
+
+	hookname = (char *)hooknames[hook];
+	*chainName = (char *)hooknames[hook];
+	comment = (char *)comments[NF_IP_TRACE_COMMENT_RULE];
+
+	xt_entry_foreach(iter, root, private->size - private->hook_entry[hook])
+		if (get_chainname_rulenum(iter, e,(const char **) hookname,
+		    (const char **)chainName,(const char **)&comment, &rulenum) != 0)
+			break;
+		
+}
+#endif
+
 #endif
 
 static inline __pure
@@ -344,6 +448,9 @@ ipt_do_table(struct sk_buff *skb,
 
 		IP_NF_ASSERT(e);
 		if (!ip_packet_match(ip, indev, outdev,
+#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
+			skb->switch_port,
+#endif
 		    &e->ip, acpar.fragoff)) {
  no_match:
 			e = ipt_next_entry(e);
@@ -782,6 +889,1084 @@ cleanup_entry(struct ipt_entry *e, struct net *net)
 	module_put(par.target->me);
 }
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static struct xt_target ipt_standard_target;
+static struct xt_target ipt_error_target;
+
+static void rtl865x_print_iptRule2Acl_tbl(void)
+{
+	rtl865x_iptRule2Acl_tbl *listNode;
+	xt_rule_to_acl_t *match2acl;
+	int i ;
+	printk("=======================================\n");
+	list_for_each_entry(listNode,&rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		printk("list->tblName(%s),list->priority(%d)\n",listNode->tblName,listNode->priority);
+		for(i = 0; i < RTL865X_CHAINLIST_NUMBER_PER_TBL; i++)
+		{
+			printk("%d\n",i);
+			list_for_each_entry(match2acl,&listNode->chainList[i],list)
+			{
+				printk("  inIf(%s) outIn(%s) aclType(0x%x) aclAction(0x%x),direction(%d)\n",match2acl->iniface,match2acl->outiface,match2acl->aclRule->ruleType_,match2acl->aclRule->actionType_,match2acl->aclRule->direction_);
+			}
+		}
+
+	}
+	printk("=======================================\n");
+}
+
+static rtl865x_iptRule2Acl_tbl* rtl865x_get_ipt2Acl_tbl(const char *name)
+{
+	rtl865x_iptRule2Acl_tbl *listNode,*retEntry;
+	retEntry = NULL;
+
+	list_for_each_entry(listNode,&rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		if(memcmp(listNode->tblName,name,strlen(name)) == 0)
+		{
+			retEntry = listNode;
+			break;
+		}
+	}
+
+	return retEntry;
+}
+
+/*translate iptables ip rule to acl*/
+static int ipt_ip2Acl(struct ipt_entry *e, rtl865x_AclRule_t *acl, int *all_match)
+{
+
+	if(e == NULL || acl == NULL)
+		return -1;
+
+
+	acl->ruleType_ = RTL865X_ACL_IP;
+
+	/*proto 0=ANY */
+	if(e->ip.proto == 0)
+		acl->ipProtoMask_ = 0x0;
+	else
+		acl->ipProtoMask_ = 0xff;
+
+	acl->srcIpAddr_ 		= e->ip.src.s_addr;
+	acl->srcIpAddrMask_	= e->ip.smsk.s_addr;
+	acl->dstIpAddr_		= e->ip.dst.s_addr;
+	acl->dstIpAddrMask_	= e->ip.dmsk.s_addr;
+	acl->ipProto_			= e->ip.proto;
+
+	if((e->ip.flags & IPT_F_FRAG) && ((e->ip.invflags & IPT_INV_FRAG) == 0) )
+	{
+		acl->ipFOP_ = 1;
+		acl->ipFOM_ = 1;
+	}
+
+	if(e->ip.smsk.s_addr == 0 && e->ip.dmsk.s_addr == 0 && e->ip.proto == 0)
+	{
+		/*all packet match this rule... so, this rule should be add to tail...*/
+		if(all_match)
+			*all_match = 1;
+		/*
+		*hyking:
+		*when all packet match this rule, we change acl->ruleType to ether type
+		*2008-12-16
+		*/
+		acl->ruleType_ = RTL865X_ACL_MAC;
+	}
+
+	return 0;
+}
+
+static int standard_target2Acl(struct xt_entry_target *t,rtl865x_AclRule_t *rule)
+{
+	switch(-(((struct xt_standard_target *)t)->verdict) -1)
+	{
+		case NF_DROP:
+			rule->actionType_ = RTL865X_ACL_DROP;
+			break;
+		case NF_ACCEPT:
+			rule->actionType_  = RTL865X_ACL_PERMIT;
+			break;
+		case NF_QUEUE:
+		case NF_REPEAT:
+		case NF_STOP:
+		case NF_STOLEN:
+			rule->actionType_ = RTL865X_ACL_TOCPU;
+			break;
+		default:
+			rule->actionType_ = RTL865X_ACL_TOCPU;
+			break;
+
+	}
+	return 0;
+}
+
+/*translate iptables rule to ACL*/
+static int translate_rule2Acl(struct ipt_entry *e,
+unsigned char *base,const char *name,unsigned int size,
+const unsigned int valid_hooks,const unsigned int *hook_entries
+#if defined(CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL)
+,struct xt_table_info *private
+#endif
+)
+{
+	int match_cnt = 0;
+	int hook_num = -1;
+	int nxt_hookNum = -1;
+	struct xt_entry_match *__match;
+	struct xt_entry_target *t,*nxt_target;
+	struct xt_target *target;
+	rtl865x_AclRule_t *rule = NULL;
+	xt_rule_to_acl_t *list_node = NULL;
+	struct ipt_entry *nxt_entry;
+	rtl865x_iptRule2Acl_tbl *ipt2AclTbl;
+	int retval;
+	unsigned int last_entry = 0;
+	unsigned int invflags = 0;
+	int allMatch = 0;
+	void	*data = NULL;
+	unsigned int default_action = RTL865X_ACL_PERMIT;
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	char	qosIfName[IFNAMSIZ];
+#endif
+#if defined(CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL)
+	char *chainName;
+#endif
+
+	t = ipt_get_target(e);
+	//if(t == NULL || (t->u.kernel.target  == &ipt_error_target) )
+	if(t == NULL || (t->u.kernel.target  == &ipt_builtin_tg[1]) )
+		goto next;
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	memset(qosIfName, 0, IFNAMSIZ);
+#endif
+
+	hook_num = get_hookNum(e,base,valid_hooks,hook_entries);
+
+	#if defined(CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL)
+	rtl_getChainName(hook_num, name, private, e, &chainName);
+
+	//if(chainName)
+		//printk("chainName is %s\n", chainName);
+	
+	if(chainName&&
+		memcmp(chainName, "PREROUTING", strlen("PREROUTING"))&&
+		memcmp(chainName, "INPUT", strlen("INPUT"))&&
+		memcmp(chainName, "FORWARD", strlen("FORWARD"))&&
+		memcmp(chainName, "OUTPUT", strlen("OUTPUT"))&&
+		memcmp(chainName, "POSTROUTING", strlen("POSTROUTING"))){
+		//printk("This rule is belong to %s, it will not add to acl!\n", chainName);
+		return 0;
+	}
+	#endif
+
+	/*last entry of this hooknum??*/
+	last_entry = 0;
+	if(((void *) e - (void *)base + e->next_offset) >= size)
+		last_entry = 1;
+
+	if(last_entry == 0)
+	{
+		nxt_entry = (struct ipt_entry *)((void *)e + e->next_offset);
+		nxt_hookNum = get_hookNum(nxt_entry,base,valid_hooks,hook_entries);
+		if(nxt_hookNum != hook_num)
+			last_entry = 1;
+
+		/*there are error rule at the end of the table...*/
+		nxt_target = ipt_get_target(nxt_entry);
+		//if(nxt_target->u.kernel.target  == &ipt_error_target)
+		if(nxt_target->u.kernel.target  == &ipt_builtin_tg[1])
+		{
+			last_entry = 1;
+		}
+	}
+
+	if(hook_num < 0 || hook_num >= NF_INET_NUMHOOKS)
+	{
+		printk("!!!!BUG!!!!%s(%d)\n",__FUNCTION__,__LINE__);
+		goto next;
+	}
+	/*if this entry is the last entry of filter table INPUT chain or output chain*/
+	if(last_entry)
+	{
+		if(t->u.kernel.target == &ipt_builtin_tg[0])
+		{
+			switch((-((struct xt_standard_target *)t)->verdict) -1)
+			{
+				case NF_DROP:
+					 default_action = RTL865X_ACL_DROP;
+					break;
+				case NF_ACCEPT:
+					 default_action = RTL865X_ACL_PERMIT;
+					break;
+				case NF_QUEUE:
+				case NF_REPEAT:
+				case NF_STOP:
+				case NF_STOLEN:
+					 default_action = RTL865X_ACL_TOCPU;
+					break;
+				default:
+					 default_action = RTL865X_ACL_TOCPU;
+					break;
+
+			}
+
+			if(hook_num == NF_INET_LOCAL_IN)
+				in_def_action = default_action;
+			else if(hook_num == NF_INET_LOCAL_OUT)
+				out_def_action = default_action;
+		}
+	}
+
+	///*only translate input&forward chain rule*/
+	//translate all chains for filter table now...
+	#if 0
+	if(	(hook_num >= NF_INET_LOCAL_OUT
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+		&& memcmp(name, RTL865X_QOS_TABLE_NAME, RTL865X_QOS_TABLE_LEN)
+#endif
+		) || (last_entry)	)
+		goto next;
+	#else
+	if(last_entry)
+		goto next;
+
+	#endif
+
+	list_node = kmalloc(sizeof(xt_rule_to_acl_t),GFP_KERNEL);
+	if(!list_node)
+	{
+		printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+		goto next;
+	}
+
+	rule = kmalloc(sizeof(rtl865x_AclRule_t), GFP_KERNEL);
+	if(!rule)
+	{
+		printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+		goto next;
+	}
+
+
+	memset(rule, 0,sizeof(rtl865x_AclRule_t));
+	//default: all packet to cpu
+	rule->actionType_ = RTL865X_ACL_TOCPU;
+	rule->pktOpApp_ = RTL865X_ACL_ALL_LAYER;
+
+	/*invert interface flag*/
+	if(e->ip.invflags & IPT_INV_VIA_IN)
+		rule->inv_flag = RTL865X_INVERT_IN_NETIF;
+
+	else if(e->ip.invflags & IPT_INV_VIA_OUT)
+		rule->inv_flag = RTL865X_INVERT_OUT_NETIF;
+
+	target = t->u.kernel.target;
+	match_cnt = IPT_MATCH_NUMBER(e);
+	retval = -1;
+	if(match_cnt == 0)
+	{
+		/*only ipt_ip & target information in iptables rule, no match rule*/
+		/*ip rule...*/
+		retval = ipt_ip2Acl(e,rule,&allMatch);
+
+		if(retval != 0)
+			printk("%s(%d) BUG!!!!\n",__FUNCTION__,__LINE__);
+
+		/*acl action....*/
+		if(t->u.kernel.target == &ipt_builtin_tg[0])
+		{
+			/*standard target*/
+			standard_target2Acl(t,rule);
+		}
+		else if (t->u.kernel.target->target2acl)
+		{
+			retval = t->u.kernel.target->target2acl(name, e, target, t->data,rule,e->comefrom, &data);
+			if(retval != 0)
+			{
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+				/* Add the following conditions for pathing qos rules */
+				if (!memcmp(name, RTL865X_QOS_TABLE_NAME, RTL865X_QOS_TABLE_LEN) &&
+					e->ip.outiface[0]=='\0' &&
+					retval == RTL_QOSFINDSPECIALNETIF)
+				{
+					memcpy(qosIfName, data, strlen(data));
+					qosIfName[strlen(data)] = '\0';
+					kfree(data);
+				}
+				else if (retval == RTL865X_SKIP_THIS_RULE)
+				{
+					goto next;
+				}
+				else
+#endif
+					rule->actionType_ = RTL865X_ACL_TOCPU;
+			}
+		}
+		else
+		{
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+			goto next;
+#endif
+			rule->actionType_ = RTL865X_ACL_TOCPU;
+
+		}
+
+		/*deal with invert flags...*/
+		if(e->ip.invflags & (IPT_INV_SRCIP|IPT_INV_DSTIP | IPT_INV_PROTO))
+		{
+			if(rule->actionType_ == RTL865X_ACL_PERMIT)
+				rule->actionType_ = RTL865X_ACL_DROP;
+			else if (rule->actionType_ == RTL865X_ACL_DROP)
+				rule->actionType_ = RTL865X_ACL_PERMIT;
+		}
+	}
+	else if(match_cnt == 1)
+	{
+		__match = (void *)(e) + sizeof(struct ipt_entry);
+
+		/*translate match to ACL rule...*/
+		if(__match->u.kernel.match && __match->u.kernel.match->match2acl)
+		{
+			retval = __match->u.kernel.match->match2acl(name, &e->ip, __match->u.kernel.match, __match->data,rule,&invflags);
+			if(retval == 0)
+			{
+				/*translate target to ACL action*/
+				if(t->u.kernel.target == &ipt_builtin_tg[0])
+				{
+					/*standard target*/
+					standard_target2Acl(t,rule);
+					#if 0
+					switch(-(((struct ipt_standard_target *)t)->verdict) -1)
+					{
+						case NF_DROP:
+							if(invflags)
+								rule->actionType_ = RTL865X_ACL_PERMIT;
+							else
+								rule->actionType_ = RTL865X_ACL_DROP;
+							break;
+						case NF_ACCEPT:
+							if(invflags)
+								rule->actionType_ = RTL865X_ACL_DROP;
+							else
+								rule->actionType_  = RTL865X_ACL_PERMIT;
+							break;
+						case NF_QUEUE:
+						case NF_REPEAT:
+						case NF_STOP:
+						case NF_STOLEN:
+							rule->actionType_ = RTL865X_ACL_TOCPU;
+							break;
+						default:
+							rule->actionType_ = RTL865X_ACL_TOCPU;
+							break;
+
+					}
+					#endif
+				}
+				else if (t->u.kernel.target->target2acl)
+				{
+					retval = t->u.kernel.target->target2acl(name, e, target, t->data,rule,e->comefrom, &data);
+					if(retval != 0)
+					{
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+						/* Add the following conditions for pathing qos rules */
+						if (!memcmp(name, RTL865X_QOS_TABLE_NAME, RTL865X_QOS_TABLE_LEN) &&
+							e->ip.outiface[0]=='\0' &&
+							retval == RTL_QOSFINDSPECIALNETIF)
+						{
+							memcpy(qosIfName, data, strlen(data));
+							qosIfName[strlen(data)] = '\0';
+							kfree(data);
+						}
+						else if (retval == RTL865X_SKIP_THIS_RULE)
+						{
+							goto next;
+						}
+						else
+#endif
+							rule->actionType_ = RTL865X_ACL_TOCPU;
+					}
+					#if 0
+					else
+					{
+						if(invflags)
+						{
+							if(rule->actionType_ == RTL865X_ACL_PERMIT)
+								rule->actionType_ = RTL865X_ACL_DROP;
+							else if(rule->actionType_ == RTL865X_ACL_DROP)
+								rule->actionType_ = RTL865X_ACL_PERMIT;
+						}
+					}
+					#endif
+				}
+				else
+				{
+					rule->actionType_ = RTL865X_ACL_TOCPU;
+				}
+				/*invert interface flag*/
+				if(invflags)
+				{
+					if(rule->actionType_ == RTL865X_ACL_PERMIT)
+						rule->actionType_ = RTL865X_ACL_DROP;
+					else if(rule->actionType_ == RTL865X_ACL_DROP)
+						rule->actionType_ = RTL865X_ACL_PERMIT;
+				}
+			}
+			else if (retval == RTL865X_ESTABLISH_RULE)
+			{
+				/*translate target to ACL action*/
+				if(t->u.kernel.target == &ipt_builtin_tg[0])
+				{
+					/*standard target*/
+					standard_target2Acl(t,rule);
+					#if 0
+					switch(-(((struct ipt_standard_target *)t)->verdict) -1)
+					{
+						case NF_DROP:
+							if(invflags)
+								rule->actionType_ = RTL865X_ACL_PERMIT;
+							else
+								rule->actionType_ = RTL865X_ACL_DROP;
+							break;
+						case NF_ACCEPT:
+							if(invflags)
+								rule->actionType_ = RTL865X_ACL_DROP;
+							else
+								rule->actionType_  = RTL865X_ACL_PERMIT;
+							break;
+						case NF_QUEUE:
+						case NF_REPEAT:
+						case NF_STOP:
+						case NF_STOLEN:
+							rule->actionType_ = RTL865X_ACL_TOCPU;
+							break;
+						default:
+							rule->actionType_ = RTL865X_ACL_TOCPU;
+							break;
+
+					}
+					#endif
+				}
+				else if (t->u.kernel.target->target2acl)
+				{
+					retval = t->u.kernel.target->target2acl(name, e, target, t->data,rule,e->comefrom, &data);
+					if(retval != 0)
+					{
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+						/* Add the following conditions for pathing qos rules */
+						if (!memcmp(name, RTL865X_QOS_TABLE_NAME, RTL865X_QOS_TABLE_LEN) &&
+							e->ip.outiface[0]=='\0' &&
+							retval == RTL_QOSFINDSPECIALNETIF)
+						{
+							memcpy(qosIfName, data, strlen(data));
+							qosIfName[strlen(data)] = '\0';
+							kfree(data);
+						}
+						else if (retval == RTL865X_SKIP_THIS_RULE)
+						{
+							goto next;
+						}
+						else
+#endif
+							rule->actionType_ = RTL865X_ACL_TOCPU;
+					}
+					#if 0
+					else
+					{
+						if(invflags)
+						{
+							if(rule->actionType_ == RTL865X_ACL_PERMIT)
+								rule->actionType_ = RTL865X_ACL_DROP;
+							else if(rule->actionType_ == RTL865X_ACL_DROP)
+								rule->actionType_ = RTL865X_ACL_PERMIT;
+						}
+					}
+					#endif
+				}
+				else
+				{
+					rule->actionType_ = RTL865X_ACL_TOCPU;
+				}
+				/*invert interface flag*/
+				if(invflags)
+				{
+					if(rule->actionType_ == RTL865X_ACL_PERMIT)
+						rule->actionType_ = RTL865X_ACL_DROP;
+					else if(rule->actionType_ == RTL865X_ACL_DROP)
+						rule->actionType_ = RTL865X_ACL_PERMIT;
+				}
+
+				if(rule->actionType_ == RTL865X_ACL_PERMIT)
+					establish_rule_permit = 1;
+
+				goto next;
+			}
+			else if(retval == RTL865X_SKIP_THIS_RULE)
+			{
+				goto next;
+			}
+			else
+			{
+				rule->ruleType_		= RTL865X_ACL_MAC;
+				rule->actionType_	= RTL865X_ACL_TOCPU;
+				rule->pktOpApp_ = RTL865X_ACL_ALL_LAYER;
+			}
+		}
+		else
+		{
+			rule->ruleType_		= RTL865X_ACL_MAC;
+			rule->actionType_	= RTL865X_ACL_TOCPU;
+			rule->pktOpApp_ = RTL865X_ACL_ALL_LAYER;
+		}
+	}
+	else if(match_cnt > 1)
+	{
+		int		len;
+		int		hasNoSpt = FALSE;
+
+		len = 0;
+		while(match_cnt>0)
+		{
+			__match = (void *)(e) + sizeof(struct ipt_entry) + len;
+
+			if(__match->u.kernel.match && __match->u.kernel.match->match2acl)
+			{
+				retval = __match->u.kernel.match->match2acl(name, &e->ip, __match->u.kernel.match, __match->data,rule,&invflags);
+
+				if(retval == 0)
+				{
+					len += __match->u.match_size;
+					match_cnt--;
+				}
+				else
+					break;
+			}
+			else
+			{
+				hasNoSpt = TRUE;
+				match_cnt--;
+//				retval = RTL865X_MATCH_NOT_SUPPORTED;
+//				break;
+			}
+		}
+
+		if (hasNoSpt==TRUE)
+			retval = RTL865X_MATCH_NOT_SUPPORTED;
+
+		if(retval == 0)
+		{
+
+			/*translate target to ACL action*/
+			if(t->u.kernel.target == &ipt_builtin_tg[0])
+			{
+				/*standard target*/
+				standard_target2Acl(t,rule);
+				#if 0
+				switch(-(((struct ipt_standard_target *)t)->verdict) -1)
+				{
+					case NF_DROP:
+						if(invflags)
+							rule->actionType_ = RTL865X_ACL_PERMIT;
+						else
+							rule->actionType_ = RTL865X_ACL_DROP;
+						break;
+					case NF_ACCEPT:
+						if(invflags)
+							rule->actionType_ = RTL865X_ACL_DROP;
+						else
+							rule->actionType_  = RTL865X_ACL_PERMIT;
+						break;
+					case NF_QUEUE:
+					case NF_REPEAT:
+					case NF_STOP:
+					case NF_STOLEN:
+						rule->actionType_ = RTL865X_ACL_TOCPU;
+						break;
+					default:
+						rule->actionType_ = RTL865X_ACL_TOCPU;
+						break;
+
+				}
+				#endif
+			}
+			else if (t->u.kernel.target->target2acl)
+			{
+				retval = t->u.kernel.target->target2acl(name, e, target, t->data,rule,e->comefrom, &data);
+				if(retval != 0)
+				{
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+					/* Add the following conditions for pathing qos rules */
+					if (!memcmp(name, RTL865X_QOS_TABLE_NAME, RTL865X_QOS_TABLE_LEN) &&
+						e->ip.outiface[0]=='\0' &&
+						retval == RTL_QOSFINDSPECIALNETIF)
+					{
+						memcpy(qosIfName, data, strlen(data));
+						qosIfName[strlen(data)] = '\0';
+						kfree(data);
+					}
+					else if (retval == RTL865X_SKIP_THIS_RULE)
+					{
+						goto next;
+					}
+					else
+#endif
+						rule->actionType_ = RTL865X_ACL_TOCPU;
+				}
+				else
+				{
+					if(invflags)
+					{
+						if(rule->actionType_ == RTL865X_ACL_PERMIT)
+							rule->actionType_ = RTL865X_ACL_DROP;
+						else if(rule->actionType_ == RTL865X_ACL_DROP)
+							rule->actionType_ = RTL865X_ACL_PERMIT;
+					}
+				}
+			}
+			else
+			{
+				rule->actionType_ = RTL865X_ACL_TOCPU;
+			}
+
+			/*invert interface flag*/
+			if(invflags)
+			{
+				if(rule->actionType_ == RTL865X_ACL_PERMIT)
+					rule->actionType_ = RTL865X_ACL_DROP;
+				else if(rule->actionType_ == RTL865X_ACL_DROP)
+					rule->actionType_ = RTL865X_ACL_PERMIT;
+			}
+
+		}
+		else if(retval == RTL865X_SKIP_THIS_RULE)
+		{
+			goto next;
+		}
+		else
+		{
+			/*add ACL trap all packet to CPU*/
+#if 0
+			memset(rule, 0,sizeof(rtl865x_AclRule_t));
+			rule->ruleType_		= RTL865X_ACL_MAC;
+			rule->actionType_	= RTL865X_ACL_TOCPU;
+			rule->pktOpApp_ = RTL865X_ACL_ALL_LAYER;
+#else
+			/* For some un-support type rules, only trap the special kinds of pkt instead of trap all */
+			rule->actionType_	= RTL865X_ACL_TOCPU;
+			rule->pktOpApp_ 	= RTL865X_ACL_ALL_LAYER;
+#endif
+		}
+	}
+	else
+		goto next;
+
+	/*add xt_rule_to_acl to list*/
+	/*
+	  *	Since we do the acl check actually in PREROUTING chain
+	  *	Some toCpu pkt maybe mis-decided by FORWARD chain rules
+	  *	So, we do the following patch.
+	  */
+	if(hook_num == NF_INET_FORWARD)
+	{
+		if(rule->actionType_ != RTL865X_ACL_PERMIT)
+			rule->actionType_ = RTL865X_ACL_TOCPU;
+
+		rule->pktOpApp_ = RTL865X_ACL_L3_AND_L4;
+	}
+
+	if(hook_num <NF_INET_LOCAL_OUT)
+		rule->direction_ = RTL865X_ACL_INGRESS;
+	else
+		rule->direction_ = RTL865X_ACL_EGRESS;
+
+	list_node->aclRule = rule;
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	if (qosIfName[0]!='\0')
+	{
+		memcpy(&list_node->iniface,qosIfName,strlen(qosIfName));
+		list_node->iniface[strlen(qosIfName)] = '\0';
+	}
+	else
+#endif
+	{
+		memcpy(&list_node->iniface,&e->ip.iniface,strlen(e->ip.iniface)+1);
+		list_node->iniface[strlen(e->ip.iniface)] = '\0';
+	}
+
+	{
+		memcpy(&list_node->outiface,&e->ip.outiface,strlen(e->ip.outiface)+1);
+		list_node->outiface[strlen(e->ip.outiface)] = '\0';
+	}
+
+	/*now, add this rule to releated chain*/
+
+	ipt2AclTbl = rtl865x_get_ipt2Acl_tbl(name);
+	if(ipt2AclTbl == NULL)
+		goto next;
+
+	if((allMatch == 1) && (!memcmp(name,"filter",strlen("filter"))))
+		list_add_tail(&list_node->list,&rtl865x_iptRule2Acl_def_rule_list);
+	else
+		list_add_tail(&list_node->list, &ipt2AclTbl->chainList[RTL865x_CHAINLIST_PRIORITY_LEVEL_0]);
+
+	return 0;
+
+next:
+
+	/*free memory and return*/
+	if(rule)
+		kfree(rule);
+
+	if(list_node)
+		kfree(list_node);
+
+	return 0;
+
+}
+
+static int translate_ipTblRules2Acl(const char *name,
+		unsigned int valid_hooks,
+		struct xt_table_info *newinfo,
+		void *entry0,
+		unsigned int size,
+		unsigned int number,
+		const unsigned int *hook_entries,
+		const unsigned int *underflows)
+{
+	int	ret;
+	struct ipt_entry *iter;
+	rtl865x_AclRule_t *rule;
+	xt_rule_to_acl_t *list_node,*nxt;
+	rtl865x_iptRule2Acl_tbl *ipt2aclTbl;
+
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+#else
+	if(memcmp(name,"filter",strlen("filter")) != 0)
+		return 0;
+#endif
+
+	ipt2aclTbl = rtl865x_get_ipt2Acl_tbl(name);
+
+	if(!ipt2aclTbl)
+	{
+		return 0;
+	}
+
+	#if defined(CONFIG_RTL_AVOID_UPNP_RULE_TO_ACL)
+	xt_entry_foreach(iter, entry0, size) {
+		ret = translate_rule2Acl(iter, entry0, name, size, valid_hooks, hook_entries, newinfo);
+	}
+	#else
+	xt_entry_foreach(iter, entry0, size) {
+		ret = translate_rule2Acl(iter, entry0, name, size, valid_hooks, hook_entries);
+	}	
+	#endif
+	
+	/*merge def_rule_list to match_to_acl_rule_list*/
+	if (!memcmp(name,"filter",strlen("filter")))
+	{
+		list_for_each_entry_safe(list_node,nxt,&rtl865x_iptRule2Acl_def_rule_list,list)
+		{
+			list_del(&list_node->list);
+			list_add_tail(&list_node->list,&ipt2aclTbl->chainList[RTL865x_CHAINLIST_PRIORITY_LEVEL_4]);
+		}
+
+	/*hyking:
+		iptables rule can't deal with packets whose action is layer2 switch,
+		so, patch this case when def_action is drop...
+	*/
+//	if((def_action == RTL865X_ACL_DROP) && !memcmp(name,"filter",strlen("filter")))
+		if(establish_rule_permit == 1)
+			in_def_action = RTL865X_ACL_PERMIT;
+
+		if((in_def_action == RTL865X_ACL_DROP))
+		{
+			/*deal with the permit multicast acl...*/
+			list_node = kmalloc(sizeof(xt_rule_to_acl_t),GFP_KERNEL);
+			if(!list_node)
+			{
+				printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+				goto next;
+			}
+
+			rule = kmalloc(sizeof(rtl865x_AclRule_t), GFP_KERNEL);
+			if(!rule)
+			{
+				if(list_node)
+					kfree(list_node);
+
+				printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+				goto next;
+			}
+
+			/*permit all multicast packet...*/
+			memset(rule, 0,sizeof(rtl865x_AclRule_t));
+			rule->ruleType_ = RTL865X_ACL_MAC;
+			rule->actionType_ = RTL865X_ACL_PERMIT;
+			rule->pktOpApp_ = RTL865X_ACL_ALL_LAYER;
+
+			rule->dstMac_.octet[0] = 0x01;
+			rule->dstMacMask_.octet[0] = 0x01;
+
+			/*add xt_rule_to_acl to list*/
+			list_node->aclRule = rule;
+			list_node->iniface[0] = '\0';
+			list_add_tail(&list_node->list,&ipt2aclTbl->chainList[RTL865x_CHAINLIST_PRIORITY_LEVEL_3]);
+
+			/*permit all arp packet*/
+			list_node = kmalloc(sizeof(xt_rule_to_acl_t),GFP_KERNEL);
+			if(!list_node)
+			{
+				printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+				goto next;
+			}
+
+			rule = kmalloc(sizeof(rtl865x_AclRule_t), GFP_KERNEL);
+			if(!rule)
+			{
+				if(list_node)
+					kfree(list_node);
+
+				printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+				goto next;
+			}
+
+			/*permit all arp packet...*/
+			memset(rule, 0,sizeof(rtl865x_AclRule_t));
+			rule->ruleType_ = RTL865X_ACL_MAC;
+			rule->actionType_ = RTL865X_ACL_PERMIT;
+			rule->pktOpApp_ = RTL865X_ACL_ALL_LAYER;
+
+			rule->typeLen_ = 0x0806;
+			rule->typeLenMask_ = 0xffff;
+
+			/*add xt_rule_to_acl to list*/
+			list_node->aclRule = rule;
+			list_node->iniface[0] = '\0';
+			list_add_tail(&list_node->list,&ipt2aclTbl->chainList[RTL865x_CHAINLIST_PRIORITY_LEVEL_3]);
+
+		}
+
+		//in bound
+		list_node = kmalloc(sizeof(xt_rule_to_acl_t),GFP_KERNEL);
+		if(!list_node)
+		{
+			printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+			goto next;
+		}
+
+		rule = kmalloc(sizeof(rtl865x_AclRule_t), GFP_KERNEL);
+		if(!rule)
+		{
+			if(list_node)
+				kfree(list_node);
+
+			printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+			goto next;
+		}
+
+		memset(rule, 0,sizeof(rtl865x_AclRule_t));
+
+
+		{
+			rule->ruleType_	= RTL865X_ACL_MAC;
+			rule->actionType_	= in_def_action;
+			rule->pktOpApp_ 	= RTL865X_ACL_ALL_LAYER;
+			rule->direction_ = RTL865X_ACL_INGRESS;
+
+			/*add xt_rule_to_acl to list*/
+			list_node->aclRule = rule;
+			list_node->iniface[0] = '\0';
+			list_add_tail(&list_node->list,&ipt2aclTbl->chainList[RTL865x_CHAINLIST_PRIORITY_LEVEL_4]);
+		}
+
+		//outbound
+		list_node = kmalloc(sizeof(xt_rule_to_acl_t),GFP_KERNEL);
+		if(!list_node)
+		{
+			printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+			goto next;
+		}
+
+		rule = kmalloc(sizeof(rtl865x_AclRule_t), GFP_KERNEL);
+		if(!rule)
+		{
+			if(list_node)
+				kfree(list_node);
+
+			printk("\n!!!!!!%s(%d): No memory freed for kmalloc!!!",__FUNCTION__,__LINE__);
+			goto next;
+		}
+
+		memset(rule, 0,sizeof(rtl865x_AclRule_t));
+
+
+		{
+			rule->ruleType_	= RTL865X_ACL_MAC;
+			rule->actionType_	= out_def_action;
+			rule->pktOpApp_ 	= RTL865X_ACL_ALL_LAYER;
+			rule->direction_ = RTL865X_ACL_EGRESS;
+
+			/*add xt_rule_to_acl to list*/
+			list_node->aclRule = rule;
+			list_node->iniface[0] = '\0';
+			list_add_tail(&list_node->list,&ipt2aclTbl->chainList[RTL865x_CHAINLIST_PRIORITY_LEVEL_4]);
+		}
+	}
+
+	return 0;
+
+next:
+	return ret;
+}
+
+static int rtl865x_free_chain_inIpt2Acl_tbl(struct list_head *listHead)
+{
+	/*free all xtmatch rule*/
+	xt_rule_to_acl_t *match2acl,*nxt;
+	list_for_each_entry_safe(match2acl,nxt,listHead,list)
+	{
+		list_del(&match2acl->list);
+		kfree(match2acl->aclRule);
+		kfree(match2acl);
+	}
+
+	return 0;
+}
+
+static int rtl865x_free_allchains_inIpt2Acl_tbl(char *name)
+{
+	rtl865x_iptRule2Acl_tbl *ipt2aclTbl = NULL;
+	int i;
+
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+	if (!memcmp(name, RTL865X_QOS_TABLE_NAME, RTL865X_QOS_TABLE_LEN))
+	{
+		rtl865x_qosFlushMarkRule();
+	}
+#endif
+
+	ipt2aclTbl = rtl865x_get_ipt2Acl_tbl(name);
+
+	if(!ipt2aclTbl)
+		return -1;
+
+	for(i = 0; i < RTL865X_CHAINLIST_NUMBER_PER_TBL; i++)
+	{
+		rtl865x_free_chain_inIpt2Acl_tbl(&ipt2aclTbl->chainList[i]);
+	}
+
+	return 0;
+}
+
+void rtl865x_rearrange_ipt2Acl_tbl(char *name)
+{
+	rtl865x_iptRule2Acl_tbl *ipt2aclTbl;
+	xt_rule_to_acl_t *match2acl;
+	int i,retval;
+#if defined(CONFIG_RTL_IPTABLES2ACL_PATCH)
+	list_for_each_entry(ipt2aclTbl,&rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		rtl865x_flush_allAcl_sw_fromChain(NULL,ipt2aclTbl->priority,RTL865X_ACL_INGRESS);
+		rtl865x_flush_allAcl_sw_fromChain(NULL,ipt2aclTbl->priority,RTL865X_ACL_EGRESS);
+	}
+
+	//_rtl865x_synAclwithAsicTbl();
+
+	list_for_each_entry(ipt2aclTbl,&rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		for(i = 0; i < RTL865X_CHAINLIST_NUMBER_PER_TBL; i++)
+		{
+			list_for_each_entry(match2acl,&ipt2aclTbl->chainList[i],list)
+			{
+				retval = rtl865x_add_sw_acl(match2acl->aclRule, match2acl->iniface, ipt2aclTbl->priority);
+			}
+		}
+
+	}
+
+	_rtl865x_synAclwithAsicTbl();
+#else
+	//hyking:since default permit before rearrange rules to acl table,don't add permit acl now.
+	//rtl865x_add_def_permit_acl();
+
+	list_for_each_entry(ipt2aclTbl,&rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		/*firstly, remove all acl which is add by user...*/
+		rtl865x_flush_allAcl_fromChain(NULL,ipt2aclTbl->priority,RTL865X_ACL_INGRESS);
+		rtl865x_flush_allAcl_fromChain(NULL,ipt2aclTbl->priority,RTL865X_ACL_EGRESS);
+
+		for(i = 0; i < RTL865X_CHAINLIST_NUMBER_PER_TBL; i++)
+		{
+			list_for_each_entry(match2acl,&ipt2aclTbl->chainList[i],list)
+			{
+				retval = rtl865x_add_acl(match2acl->aclRule, match2acl->iniface, ipt2aclTbl->priority);
+			}
+		}
+	}
+
+	//rtl865x_del_def_permit_acl();
+#endif
+}
+
+
+/*
+	tbl->priority: the minimum has highest priority
+*/
+int rtl865x_register_ipt2Acl_tbl(rtl865x_iptRule2Acl_tbl *tbl)
+{
+	rtl865x_iptRule2Acl_tbl *node,*insPos;
+
+	insPos = NULL;
+	node = NULL;
+
+	node = rtl865x_get_ipt2Acl_tbl(tbl->tblName);
+	if(node != NULL)
+		return -1;
+
+	list_for_each_entry(node,&rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		if(node->priority > tbl->priority)
+		{
+			insPos = node;
+			break;
+		}
+	}
+
+	/*now, insert before the insPos*/
+	if(insPos)
+	{
+		list_add(&tbl->list, insPos->list.prev);
+	}
+	else
+	{
+		list_add_tail(&tbl->list, &rtl865x_iptRule2Acl_tbl_list);
+	}
+
+	return 0;
+}
+
+int rtl865x_unregister_ipt2Acl_tbl(char *tblName)
+{
+	rtl865x_iptRule2Acl_tbl *listNode,*nxt;
+	int i;
+	list_for_each_entry_safe(listNode, nxt, &rtl865x_iptRule2Acl_tbl_list,list)
+	{
+		if(memcmp(listNode->tblName,tblName,strlen(tblName)) == 0)
+		{
+			list_del(&listNode->list);
+			for(i = 0; i < RTL865X_CHAINLIST_NUMBER_PER_TBL; i++)
+				rtl865x_free_chain_inIpt2Acl_tbl(&listNode->chainList[i]);
+			kfree(listNode);
+			return 0;
+		}
+	}
+
+	return -1;
+}
+
+#endif
+
+
 /* Checks and translates the user-supplied table segment (held in
    newinfo) */
 static int
@@ -791,6 +1976,16 @@ translate_table(struct net *net, struct xt_table_info *newinfo, void *entry0,
 	struct ipt_entry *iter;
 	unsigned int i;
 	int ret = 0;
+#if defined(CONFIG_RTL_819X)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)
+	char *name;
+	unsigned int *hook_entries;
+	unsigned int valid_hooks;
+	unsigned int size;
+	unsigned int *underflows;
+	unsigned int number;
+#endif
+#endif
 
 	newinfo->size = repl->size;
 	newinfo->number = repl->num_entries;
@@ -861,6 +2056,61 @@ translate_table(struct net *net, struct xt_table_info *newinfo, void *entry0,
 		}
 		return ret;
 	}
+#if defined(CONFIG_RTL_819X)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)
+	name 		= (char *)(repl->name);
+	hook_entries 	=(unsigned int *) (repl->hook_entry);
+	valid_hooks 	= repl->valid_hooks;
+	size 			= repl->size;
+	underflows	=(unsigned int *) (repl->underflow);
+	number		= repl->num_entries;
+#endif
+#endif
+
+	#if defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_AP_PACKAGE)
+	rtl_translate_table_hooks(name,valid_hooks,newinfo,entry0,size,number,hook_entries,underflows);
+	#endif
+
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	{
+		rtl865x_iptRule2Acl_tbl *tbl;
+		int i,ret;
+		int32_t priority;
+
+		if(memcmp(name,"filter",strlen("filter")) == 0)
+			priority = RTL865X_ACL_USER_USED;
+#if  defined(CONFIG_RTL_HW_QOS_SUPPORT)
+		else if(memcmp(name,RTL865X_QOS_TABLE_NAME,RTL865X_QOS_TABLE_LEN) == 0)
+			priority = RTL865X_ACL_QOS_USED2;
+#endif
+		else
+			priority = 1024;
+		if(priority < 1024)
+		{
+			tbl = kmalloc(sizeof(rtl865x_iptRule2Acl_tbl), GFP_KERNEL);
+			if(!tbl)
+				return 0;
+			memset(tbl, 0, sizeof(rtl865x_iptRule2Acl_tbl));
+			for(i = 0; i < RTL865X_CHAINLIST_NUMBER_PER_TBL; i++)
+			{
+				INIT_LIST_HEAD(&tbl->chainList[i]);
+			}
+			tbl->priority = priority;
+			memcpy(tbl->tblName,name,strlen(name));
+			tbl->tblName[strlen(name)] = '\0';
+
+			ret = rtl865x_register_ipt2Acl_tbl(tbl);
+
+			if(ret != 0)
+			{
+				kfree(tbl);
+			}
+		}
+	}
+#endif
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	translate_ipTblRules2Acl(name,valid_hooks,newinfo,entry0,size,number,hook_entries,underflows);
+#endif
 
 	/* And one copy for every other CPU */
 	for_each_possible_cpu(i) {
@@ -1271,6 +2521,12 @@ do_replace(struct net *net, const void __user *user, unsigned int len)
 		ret = -EFAULT;
 		goto free_newinfo;
 	}
+	
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	/*firstly, free all iptblAcl which added last time*/
+	establish_rule_permit = 0;
+	rtl865x_free_allchains_inIpt2Acl_tbl(tmp.name);
+#endif
 
 	ret = translate_table(net, newinfo, loc_cpu_entry, &tmp);
 	if (ret != 0)
@@ -1282,12 +2538,22 @@ do_replace(struct net *net, const void __user *user, unsigned int len)
 			   tmp.num_counters, tmp.counters);
 	if (ret)
 		goto free_newinfo_untrans;
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	//rtl865x_rearrange_iptblAcl();
+	//rtl865x_print_iptRule2Acl_tbl();
+	rtl865x_rearrange_ipt2Acl_tbl(tmp.name);
+#endif
+
 	return 0;
 
  free_newinfo_untrans:
 	xt_entry_foreach(iter, loc_cpu_entry, newinfo->size)
 		cleanup_entry(iter, net);
  free_newinfo:
+ #if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+	rtl865x_free_allchains_inIpt2Acl_tbl(tmp.name);
+#endif
+
 	xt_free_table_info(newinfo);
 	return ret;
 }
@@ -2160,6 +3426,52 @@ static int icmp_checkentry(const struct xt_mtchk_param *par)
 	return (icmpinfo->invflags & ~IPT_ICMP_INV) ? -EINVAL : 0;
 }
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+static int icmp_match2acl(const char *tablename,
+			  const void *ip,
+			  const struct xt_match *match,
+			  void *matchinfo,
+			  void *acl_rule,
+			  unsigned int *invflags)
+{
+	const struct ipt_ip *ip_info = (struct ipt_ip *) ip;
+	const struct ipt_icmp *icmpinfo = matchinfo;
+	unsigned int code_range = 0;
+	int i = 0;
+	rtl865x_AclRule_t *rule = (rtl865x_AclRule_t *)acl_rule;
+
+
+	if(ip == NULL || matchinfo == NULL)
+		return 1;
+
+	rule->ruleType_ = RTL865X_ACL_ICMP;
+	rule->srcIpAddr_ 		= ip_info->src.s_addr;
+	rule->srcIpAddrMask_	= ip_info->smsk.s_addr;
+	rule->dstIpAddr_		= ip_info->dst.s_addr;
+	rule->dstIpAddrMask_	= ip_info->dmsk.s_addr;
+
+	rule->icmpType_ 	= icmpinfo->type;
+	rule->icmpTypeMask_ 	= 0xff;
+	//rule->icmpCode_	= icmpinfo->code;
+	code_range = icmpinfo->code[1] - icmpinfo->code[0];
+	for(i = 0; i <8 ; i++)
+	{
+		if(code_range >> i)
+			continue;
+		break;
+	}
+	rule->icmpCode_	= icmpinfo->code[0];
+	rule->icmpCodeMask_ = 0xff << i;
+
+	if(icmpinfo->invflags & IPT_ICMP_INV)
+		if(invflags)
+			*invflags = 1;
+
+	return 0;
+}
+#endif
+
+#if !defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
 static struct xt_target ipt_builtin_tg[] __read_mostly = {
 	{
 		.name             = XT_STANDARD_TARGET,
@@ -2178,7 +3490,7 @@ static struct xt_target ipt_builtin_tg[] __read_mostly = {
 		.family           = NFPROTO_IPV4,
 	},
 };
-
+#endif
 static struct nf_sockopt_ops ipt_sockopts = {
 	.pf		= PF_INET,
 	.set_optmin	= IPT_BASE_CTL,
@@ -2204,6 +3516,10 @@ static struct xt_match ipt_builtin_mt[] __read_mostly = {
 		.checkentry = icmp_checkentry,
 		.proto      = IPPROTO_ICMP,
 		.family     = NFPROTO_IPV4,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+		.match2acl	= icmp_match2acl,
+#endif
+
 	},
 };
 
@@ -2243,6 +3559,14 @@ static int __init ip_tables_init(void)
 	if (ret < 0)
 		goto err5;
 
+	#if defined(CONFIG_RTL_819X)
+	rtl_ip_tables_init_hooks();
+	#endif
+
+#if defined (CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_NETFILTER)
+	IgmpRxFilter_Hook = ipt_do_table;
+#endif
+
 	pr_info("(C) 2000-2006 Netfilter Core Team\n");
 	return 0;
 
@@ -2263,6 +3587,9 @@ static void __exit ip_tables_fini(void)
 	xt_unregister_matches(ipt_builtin_mt, ARRAY_SIZE(ipt_builtin_mt));
 	xt_unregister_targets(ipt_builtin_tg, ARRAY_SIZE(ipt_builtin_tg));
 	unregister_pernet_subsys(&ip_tables_net_ops);
+#if defined (CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_NETFILTER)
+	IgmpRxFilter_Hook = NULL;
+#endif
 }
 
 EXPORT_SYMBOL(ipt_register_table);

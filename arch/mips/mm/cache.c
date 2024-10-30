@@ -20,7 +20,7 @@
 #include <asm/processor.h>
 #include <asm/cpu.h>
 #include <asm/cpu-features.h>
-
+#include <linux/highmem.h>
 /* Cache operations. */
 void (*flush_cache_all)(void);
 void (*__flush_cache_all)(void);
@@ -50,6 +50,16 @@ EXPORT_SYMBOL_GPL(local_flush_data_cache_page);
 EXPORT_SYMBOL(flush_data_cache_page);
 EXPORT_SYMBOL(flush_icache_all);
 
+
+static void
+  flush_highmem_page(struct page *page)
+  {
+         void *addr = kmap_atomic(page);
+         flush_data_cache_page((unsigned long)addr);
+         kunmap_atomic(addr);
+  }
+  
+
 #ifdef CONFIG_DMA_NONCOHERENT
 
 /* DMA cache operations. */
@@ -60,6 +70,20 @@ void (*_dma_cache_inv)(unsigned long start, unsigned long size);
 EXPORT_SYMBOL(_dma_cache_wback_inv);
 
 #endif /* CONFIG_DMA_NONCOHERENT */
+
+void __flush_icache_page(struct vm_area_struct *vma, struct page *page)
+{
+       unsigned long addr;
+
+       if (PageHighMem(page)) {
+	       flush_highmem_page(page);
+               return;
+       }
+
+       addr = (unsigned long) page_address(page);
+       flush_data_cache_page(addr);
+}
+EXPORT_SYMBOL_GPL(__flush_icache_page);
 
 /*
  * We could optimize the case where the cache argument is not BCACHE but
@@ -83,13 +107,18 @@ void __flush_dcache_page(struct page *page)
 	struct address_space *mapping = page_mapping(page);
 	unsigned long addr;
 
-	if (PageHighMem(page))
-		return;
+//	if (PageHighMem(page))
+//		return;
 	if (mapping && !mapping_mapped(mapping)) {
 		SetPageDcacheDirty(page);
 		return;
 	}
 
+
+	if (PageHighMem(page)) {
+                 flush_highmem_page(page);
+                 return;
+         }
 	/*
 	 * We could delay the flush for the !page_mapping case too.  But that
 	 * case is for exec env/arg pages and those are %99 certainly going to
@@ -104,6 +133,11 @@ EXPORT_SYMBOL(__flush_dcache_page);
 void __flush_anon_page(struct page *page, unsigned long vmaddr)
 {
 	unsigned long addr = (unsigned long) page_address(page);
+
+	if (PageHighMem(page)) {
+                 flush_highmem_page(page);
+               return;
+}
 
 	if (pages_do_alias(addr, vmaddr)) {
 		if (page_mapped(page) && !Page_dcache_dirty(page)) {
@@ -130,7 +164,12 @@ void __update_cache(struct vm_area_struct *vma, unsigned long address,
 	if (unlikely(!pfn_valid(pfn)))
 		return;
 	page = pfn_to_page(pfn);
-	if (page_mapping(page) && Page_dcache_dirty(page)) {
+//	if (page_mapping(page) && Page_dcache_dirty(page)) {
+	if (!Page_dcache_dirty(page))
+	             return;
+	if (PageHighMem(page)) {
+	      flush_highmem_page(page);
+	 } else if (page_mapping(page)) {
 		addr = (unsigned long) page_address(page);
 		if (exec || pages_do_alias(addr, address & PAGE_MASK))
 			flush_data_cache_page(addr);
@@ -143,79 +182,29 @@ EXPORT_SYMBOL(_page_cachable_default);
 
 static inline void setup_protection_map(void)
 {
-	if (cpu_has_rixi) {
-		protection_map[0]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC | _PAGE_NO_READ);
-		protection_map[1]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC);
-		protection_map[2]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC | _PAGE_NO_READ);
-		protection_map[3]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC);
-		protection_map[4]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_READ);
-		protection_map[5]  = __pgprot(_page_cachable_default | _PAGE_PRESENT);
-		protection_map[6]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_READ);
-		protection_map[7]  = __pgprot(_page_cachable_default | _PAGE_PRESENT);
-
-		protection_map[8]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC | _PAGE_NO_READ);
-		protection_map[9]  = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC);
-		protection_map[10] = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC | _PAGE_WRITE | _PAGE_NO_READ);
-		protection_map[11] = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_EXEC | _PAGE_WRITE);
-		protection_map[12] = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_NO_READ);
-		protection_map[13] = __pgprot(_page_cachable_default | _PAGE_PRESENT);
-		protection_map[14] = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_WRITE  | _PAGE_NO_READ);
-		protection_map[15] = __pgprot(_page_cachable_default | _PAGE_PRESENT | _PAGE_WRITE);
-
-	} else {
-		protection_map[0] = PAGE_NONE;
-		protection_map[1] = PAGE_READONLY;
-		protection_map[2] = PAGE_COPY;
-		protection_map[3] = PAGE_COPY;
-		protection_map[4] = PAGE_READONLY;
-		protection_map[5] = PAGE_READONLY;
-		protection_map[6] = PAGE_COPY;
-		protection_map[7] = PAGE_COPY;
-		protection_map[8] = PAGE_NONE;
-		protection_map[9] = PAGE_READONLY;
-		protection_map[10] = PAGE_SHARED;
-		protection_map[11] = PAGE_SHARED;
-		protection_map[12] = PAGE_READONLY;
-		protection_map[13] = PAGE_READONLY;
-		protection_map[14] = PAGE_SHARED;
-		protection_map[15] = PAGE_SHARED;
-	}
+	protection_map[0] = PAGE_NONE;
+	protection_map[1] = PAGE_READONLY;
+	protection_map[2] = PAGE_COPY;
+	protection_map[3] = PAGE_COPY;
+	protection_map[4] = PAGE_READONLY;
+	protection_map[5] = PAGE_READONLY;
+	protection_map[6] = PAGE_COPY;
+	protection_map[7] = PAGE_COPY;
+	protection_map[8] = PAGE_NONE;
+	protection_map[9] = PAGE_READONLY;
+	protection_map[10] = PAGE_SHARED;
+	protection_map[11] = PAGE_SHARED;
+	protection_map[12] = PAGE_READONLY;
+	protection_map[13] = PAGE_READONLY;
+	protection_map[14] = PAGE_SHARED;
+	protection_map[15] = PAGE_SHARED;
 }
 
 void __cpuinit cpu_cache_init(void)
 {
-	if (cpu_has_3k_cache) {
-		extern void __weak r3k_cache_init(void);
+	extern void __weak r4k_cache_init(void);
 
-		r3k_cache_init();
-	}
-	if (cpu_has_6k_cache) {
-		extern void __weak r6k_cache_init(void);
-
-		r6k_cache_init();
-	}
-	if (cpu_has_4k_cache) {
-		extern void __weak r4k_cache_init(void);
-
-		r4k_cache_init();
-	}
-	if (cpu_has_8k_cache) {
-		extern void __weak r8k_cache_init(void);
-
-		r8k_cache_init();
-	}
-	if (cpu_has_tx39_cache) {
-		extern void __weak tx39_cache_init(void);
-
-		tx39_cache_init();
-	}
-
-	if (cpu_has_octeon_cache) {
-		extern void __weak octeon_cache_init(void);
-
-		octeon_cache_init();
-	}
-
+	r4k_cache_init();
 	setup_protection_map();
 }
 

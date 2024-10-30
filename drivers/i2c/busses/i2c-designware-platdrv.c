@@ -43,10 +43,18 @@
 #include <linux/acpi.h>
 #include "i2c-designware-core.h"
 
+struct dw_i2c_dev_info {
+        u32                     sda_hold_time_ns;
+        u8                      speed_mode;
+	u32			timeout_time_ms;
+	struct i2c_bus_recovery_info	i2c_bus_recovery;
+};
+
 static struct i2c_algorithm i2c_dw_algo = {
 	.master_xfer	= i2c_dw_xfer,
 	.functionality	= i2c_dw_func,
 };
+
 static u32 i2c_dw_get_clk_rate_khz(struct dw_i2c_dev *dev)
 {
 	return clk_get_rate(dev->clk)/1000;
@@ -82,7 +90,9 @@ static inline int dw_i2c_acpi_configure(struct platform_device *pdev)
 
 static int dw_i2c_probe(struct platform_device *pdev)
 {
+
 	struct dw_i2c_dev *dev;
+	struct dw_i2c_dev_info *info;
 	struct i2c_adapter *adap;
 	struct resource *mem;
 	int irq, r;
@@ -105,6 +115,7 @@ static int dw_i2c_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	dev->base = devm_ioremap_resource(&pdev->dev, mem);
+
 	if (IS_ERR(dev->base))
 		return PTR_ERR(dev->base);
 
@@ -115,11 +126,19 @@ static int dw_i2c_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, dev);
 
 	dev->clk = devm_clk_get(&pdev->dev, NULL);
-	dev->get_clk_rate_khz = i2c_dw_get_clk_rate_khz;
-
+        dev->get_clk_rate_khz = i2c_dw_get_clk_rate_khz;
 	if (IS_ERR(dev->clk))
-		return PTR_ERR(dev->clk);
-	clk_prepare_enable(dev->clk);
+                return PTR_ERR(dev->clk);
+        clk_prepare_enable(dev->clk);
+
+
+	info = dev->dev->platform_data;
+        if(info)
+        {
+           dev->speed_mode = info->speed_mode;
+           dev->sda_hold_time_ns = info->sda_hold_time_ns;
+	   dev->timeout_jiffies = info->timeout_time_ms * HZ / 1000;
+        }
 
 	dev->functionality =
 		I2C_FUNC_I2C |
@@ -128,8 +147,8 @@ static int dw_i2c_probe(struct platform_device *pdev)
 		I2C_FUNC_SMBUS_BYTE_DATA |
 		I2C_FUNC_SMBUS_WORD_DATA |
 		I2C_FUNC_SMBUS_I2C_BLOCK;
-	dev->master_cfg =  DW_IC_CON_MASTER | DW_IC_CON_SLAVE_DISABLE |
-		DW_IC_CON_RESTART_EN | DW_IC_CON_SPEED_FAST;
+	dev->master_cfg = DW_IC_CON_MASTER | DW_IC_CON_SLAVE_DISABLE | dev->speed_mode |
+		DW_IC_CON_RESTART_EN;
 
 	/* Try first if we can configure the device from ACPI */
 	r = dw_i2c_acpi_configure(pdev);
@@ -140,6 +159,8 @@ static int dw_i2c_probe(struct platform_device *pdev)
 		dev->rx_fifo_depth = ((param1 >> 8)  & 0xff) + 1;
 		dev->adapter.nr = pdev->id;
 	}
+	
+
 	r = i2c_dw_init(dev);
 	if (r)
 		return r;
@@ -162,11 +183,19 @@ static int dw_i2c_probe(struct platform_device *pdev)
 	adap->dev.parent = &pdev->dev;
 	adap->dev.of_node = pdev->dev.of_node;
 
+	/* Bus recovery support */
+	if(info)
+	{
+        adap->bus_recovery_info = &(info->i2c_bus_recovery);
+	adap->bus_recovery_info->recover_bus = i2c_generic_gpio_recovery;
+	}
+
 	r = i2c_add_numbered_adapter(adap);
 	if (r) {
 		dev_err(&pdev->dev, "failure adding adapter\n");
 		return r;
 	}
+
 	of_i2c_register_devices(adap);
 	acpi_i2c_register_devices(adap);
 

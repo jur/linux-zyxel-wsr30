@@ -79,6 +79,7 @@ struct devtable **__start___devtable, **__stop___devtable;
 extern struct devtable *__start___devtable[], *__stop___devtable[];
 #endif /* __MACH__ */
 
+#undef __used
 #if __GNUC__ == 3 && __GNUC_MINOR__ < 3
 # define __used			__attribute__((__unused__))
 #else
@@ -114,7 +115,7 @@ do {                                                            \
                 sprintf(str + strlen(str),                      \
                         sizeof(field) == 1 ? "%02X" :           \
                         sizeof(field) == 2 ? "%04X" :           \
-                        sizeof(field) == 4 ? "%08X" : "",       \
+                        sizeof(field) == 4 ? "%08X" : "%X",     \
                         field);                                 \
         else                                                    \
                 sprintf(str + strlen(str), "*");                \

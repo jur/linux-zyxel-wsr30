@@ -196,6 +196,8 @@ static const struct bin_table bin_net_core_table[] = {
 	{ CTL_INT,	NET_CORE_AEVENT_ETIME,	"xfrm_aevent_etime" },
 	{ CTL_INT,	NET_CORE_AEVENT_RSEQTH,	"xfrm_aevent_rseqth" },
 	{ CTL_INT,	NET_CORE_WARNINGS,	"warnings" },
+	{ CTL_INT,	NET_CORE_FASTMESH_ENABLE,	"fastmesh_enable" },
+	{ CTL_INT,	NET_CORE_SHOW_FASTMESH_MSG,	"show_fastmesh_msg" }, 
 	{},
 };
 

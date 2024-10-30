@@ -30,6 +30,13 @@
 #include <net/netfilter/nf_log.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
+#if defined(FAST_PATH_SPI_ENABLED)
+extern int fast_spi;
+#endif
 
 /* "Be conservative in what you do,
     be liberal in what you accept from others."
@@ -269,6 +276,34 @@ static const u8 tcp_conntracks[2][6][TCP_CONNTRACK_MAX] = {
 	}
 };
 
+#if defined(CONFIG_RTL_IPTABLES_FAST_PATH) || defined(CONFIG_RTL_HARDWARE_NAT)
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+static unsigned int *tcp_get_timeouts(struct net *net);
+int	tcp_get_timeouts_by_state(u_int8_t state,void *ct_or_cp,int is_ct)
+{
+    struct net *net = NULL;
+    unsigned int *tcp_timeouts_run = NULL;
+    if(is_ct){
+        struct nf_conn *ct = (struct nf_conn *)ct_or_cp;
+        net = nf_ct_net(ct);
+    }
+	else{
+        struct ip_vs_conn *cp = (struct ip_vs_conn *)ct_or_cp;
+		net = ip_vs_conn_net(cp);
+    }
+	tcp_timeouts_run = tcp_get_timeouts(net);
+    //net_warn_ratelimited("--%s--%d-- state = %d,  tcp_timeouts_run[%s] = %d\n",__FUNCTION__,__LINE__,state,tcp_conntrack_names[state],tcp_timeouts_run[state]);
+	return tcp_timeouts_run[state];
+}
+#else
+int	tcp_get_timeouts_by_state(u_int8_t	state)
+{
+	return tcp_timeouts[state];
+}
+#endif
+#endif
+
 static inline struct nf_tcp_net *tcp_pernet(struct net *net)
 {
 	return &net->ct.nf_ct_proto.tcp;
@@ -434,6 +469,7 @@ static void tcp_options(const struct sk_buff *skb,
 	}
 }
 
+#if defined(FAST_PATH_SPI_ENABLED) || !(defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT))
 static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
                      const struct tcphdr *tcph, __u32 *sack)
 {
@@ -494,6 +530,7 @@ static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
 		}
 	}
 }
+#endif
 
 #ifdef CONFIG_NF_NAT_NEEDED
 static inline s16 nat_offset(const struct nf_conn *ct,
@@ -510,7 +547,11 @@ static inline s16 nat_offset(const struct nf_conn *ct,
 #define NAT_OFFSET(ct, dir, seq)	0
 #endif
 
-static bool tcp_in_window(const struct nf_conn *ct,
+#if defined(FAST_PATH_SPI_ENABLED) || !(defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT))
+#if !defined(FAST_PATH_SPI_ENABLED)
+static
+#endif
+bool tcp_in_window(const struct nf_conn *ct,
 			  struct ip_ct_tcp *state,
 			  enum ip_conntrack_dir dir,
 			  unsigned int index,
@@ -741,6 +782,7 @@ static bool tcp_in_window(const struct nf_conn *ct,
 
 	return res;
 }
+#endif
 
 /* table of valid flag combinations - PUSH, ECE and CWR are always valid */
 static const u8 tcp_valid_flags[(TCPHDR_FIN|TCPHDR_SYN|TCPHDR_RST|TCPHDR_ACK|
@@ -835,6 +877,9 @@ static int tcp_packet(struct nf_conn *ct,
 	struct tcphdr _tcph;
 	unsigned long timeout;
 	unsigned int index;
+#if defined(CONFIG_RTL_819X)
+	rtl_nf_conntrack_inso_s	conn_info;
+#endif
 
 	th = skb_header_pointer(skb, dataoff, sizeof(_tcph), &_tcph);
 	BUG_ON(th == NULL);
@@ -845,6 +890,16 @@ static int tcp_packet(struct nf_conn *ct,
 	index = get_conntrack_index(th);
 	new_state = tcp_conntracks[dir][index][old_state];
 	tuple = &ct->tuplehash[dir].tuple;
+#if defined(CONFIG_RTL_819X)
+	conn_info.net = net;
+	conn_info.ct = ct;
+	conn_info.skb = (struct sk_buff *)skb;
+	conn_info.hooknum = hooknum;
+	conn_info.ctinfo = ctinfo;
+	conn_info.new_state=new_state;
+	conn_info.old_state=old_state;
+	rtl_tcp_packet_hooks(&conn_info);
+#endif
 
 	switch (new_state) {
 	case TCP_CONNTRACK_SYN_SENT:
@@ -998,11 +1053,17 @@ static int tcp_packet(struct nf_conn *ct,
 		break;
 	}
 
-	if (!tcp_in_window(ct, &ct->proto.tcp, dir, index,
+#if defined(FAST_PATH_SPI_ENABLED) || !(defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT))
+	if (
+#if defined(FAST_PATH_SPI_ENABLED)
+		(fast_spi == 1) &&
+#endif
+		!tcp_in_window(ct, &ct->proto.tcp, dir, index,
 			   skb, dataoff, th, pf)) {
 		spin_unlock_bh(&ct->lock);
 		return -NF_ACCEPT;
 	}
+#endif
      in_window:
 	/* From now on we have got in-window packets */
 	ct->proto.tcp.last_index = index;
@@ -1059,7 +1120,13 @@ static int tcp_packet(struct nf_conn *ct,
 		set_bit(IPS_ASSURED_BIT, &ct->status);
 		nf_conntrack_event_cache(IPCT_ASSURED, ct);
 	}
+
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	nf_ct_refresh_acct_tcp(ct, ctinfo, skb, timeout, old_state, new_state);
+#else
 	nf_ct_refresh_acct(ct, ctinfo, skb, timeout);
+#endif
+	//nf_ct_refresh_acct(ct, ctinfo, skb, timeout);
 
 	return NF_ACCEPT;
 }

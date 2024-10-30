@@ -106,8 +106,8 @@ extern struct boot_mem_map boot_mem_map;
 extern void add_memory_region(phys_t start, phys_t size, long type);
 extern void detect_memory_region(phys_t start, phys_t sz_min,  phys_t sz_max);
 
-extern void prom_init(void);
-extern void prom_free_prom_memory(void);
+extern void bsp_init(void);
+extern void bsp_free_prom_memory(void);
 
 extern void free_init_pages(const char *what,
 			    unsigned long begin, unsigned long end);
@@ -125,7 +125,7 @@ extern unsigned long fw_arg0, fw_arg1, fw_arg2, fw_arg3;
 /*
  * Platform memory detection hook called by setup_arch
  */
-extern void plat_mem_setup(void);
+extern void bsp_setup(void);
 
 #ifdef CONFIG_SWIOTLB
 /*

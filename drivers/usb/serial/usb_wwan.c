@@ -295,6 +295,12 @@ static void usb_wwan_indat_callback(struct urb *urb)
 			dev_dbg(dev, "%s: empty read urb received\n", __func__);
 	}
 	/* Resubmit urb so we continue receiving */
+#if 1//bruce
+	if (status == -ENOENT) {
+		dev_dbg(dev, "%s: Don't resubmit urb\n", __func__);
+		return;
+	}
+#endif
 	err = usb_submit_urb(urb, GFP_ATOMIC);
 	if (err) {
 		if (err != -EPERM) {

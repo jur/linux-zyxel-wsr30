@@ -16,6 +16,11 @@
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/xt_iprange.h>
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+#include <net/rtl/rtl_types.h>
+#include <net/rtl/rtl865x_netif.h>
+#endif
+
 static bool
 iprange_mt4(const struct sk_buff *skb, struct xt_action_param *par)
 {
@@ -51,6 +56,116 @@ iprange_mt4(const struct sk_buff *skb, struct xt_action_param *par)
 	}
 	return true;
 }
+
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+#if 0
+static int iprange_match2acl(const char *tablename,
+                          const void *ip,
+                          const struct xt_match *match,
+                          void *matchinfo,
+                          void *acl_rule,
+                          unsigned int *invflags)
+{
+ 
+        const struct ipt_iprange_info *info = matchinfo;
+	rtl865x_AclRule_t *rule = (rtl865x_AclRule_t *)acl_rule;
+ 
+        if(ip == NULL || matchinfo == NULL || rule == NULL)
+                return 1;
+ 
+        switch(rule->ruleType_)
+        {
+                case            RTL865X_ACL_TCP:
+                        rule->ruleType_ = RTL865X_ACL_TCP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_UDP:
+                        rule->ruleType_ = RTL865X_ACL_UDP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_IGMP:
+                        rule->ruleType_ = RTL865X_ACL_ICMP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_ICMP:
+                        rule->ruleType_ = RTL865X_ACL_IGMP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_SRCFILTER:
+                        rule->ruleType_ = RTL865X_ACL_SRCFILTER_IPRANGE;
+                        break;
+                case            RTL865X_ACL_MAC:
+                case            RTL865X_ACL_IP:
+                        rule->ruleType_ = RTL865X_ACL_IP_RANGE;
+                        break;
+                default:
+                        return 1;
+        }
+
+        rule->srcIpAddrLB_ = rule->dstIpAddrLB_ = 0;
+        rule->srcIpAddrUB_ = rule->dstIpAddrUB_ = 0xffffffff;
+        if (info->flags & IPRANGE_SRC) {
+                rule->srcIpAddrLB_ = ntohl(info->src.min_ip);
+                rule->srcIpAddrUB_ = ntohl(info->src.max_ip);
+        }
+        if (info->flags & IPRANGE_DST) {
+                rule->dstIpAddrLB_ = ntohl(info->dst.min_ip);
+                rule->dstIpAddrUB_ = ntohl(info->dst.max_ip);
+        }
+ 
+        return 0;
+}
+#endif
+static int iprange_match2acl_mt4(const char *tablename,
+                          const void *ip,
+                          const struct xt_match *match,
+                          void *matchinfo,
+                          void *acl_rule,
+                          unsigned int *invflags)
+{
+ 
+        const struct xt_iprange_mtinfo *info = matchinfo;
+	rtl865x_AclRule_t *rule = (rtl865x_AclRule_t *)acl_rule;
+ 
+        if(ip == NULL || matchinfo == NULL || rule == NULL)
+                return 1;
+ 
+        switch(rule->ruleType_)
+        {
+                case            RTL865X_ACL_TCP:
+                        rule->ruleType_ = RTL865X_ACL_TCP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_UDP:
+                        rule->ruleType_ = RTL865X_ACL_UDP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_IGMP:
+                        rule->ruleType_ = RTL865X_ACL_ICMP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_ICMP:
+                        rule->ruleType_ = RTL865X_ACL_IGMP_IPRANGE;
+                        break;
+                case            RTL865X_ACL_SRCFILTER:
+                        rule->ruleType_ = RTL865X_ACL_SRCFILTER_IPRANGE;
+                        break;
+                case            RTL865X_ACL_MAC:
+                case            RTL865X_ACL_IP:
+                        rule->ruleType_ = RTL865X_ACL_IP_RANGE;
+                        break;
+                default:
+                        return 1;
+        }
+
+        rule->srcIpAddrLB_ = rule->dstIpAddrLB_ = 0;
+        rule->srcIpAddrUB_ = rule->dstIpAddrUB_ = 0xffffffff;
+        if (info->flags & IPRANGE_SRC) {
+                rule->srcIpAddrLB_ = info->src_min.in.s_addr;
+                rule->srcIpAddrUB_ = info->src_max.in.s_addr;
+        }
+        if (info->flags & IPRANGE_DST) {
+                rule->dstIpAddrLB_ = info->dst_min.in.s_addr;
+                rule->dstIpAddrUB_ = info->dst_max.in.s_addr;
+        }
+ 
+        return 0;
+}
+#endif
+
 
 static inline int
 iprange_ipv6_lt(const struct in6_addr *a, const struct in6_addr *b)
@@ -109,6 +224,9 @@ static struct xt_match iprange_mt_reg[] __read_mostly = {
 		.match     = iprange_mt4,
 		.matchsize = sizeof(struct xt_iprange_mtinfo),
 		.me        = THIS_MODULE,
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+        	.match2acl      = iprange_match2acl_mt4,
+#endif
 	},
 	{
 		.name      = "iprange",

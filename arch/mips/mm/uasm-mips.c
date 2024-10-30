@@ -154,7 +154,7 @@ static void __uasminit build_insn(u32 **buf, enum opcode opc, ...)
 			break;
 		}
 
-	if (!ip || (opc == insn_daddiu && r4k_daddiu_bug()))
+	if (!ip)
 		panic("Unsupported Micro-assembler instruction %d", opc);
 
 	op = ip->match;

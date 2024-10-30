@@ -63,6 +63,12 @@ struct usbnet {
 
 	struct work_struct	kevent;
 	unsigned long		flags;
+#if defined(CONFIG_USB_NET_IPV6_PASSTHRU)
+#define USBNET_PSEUDO_NEGTIVE	0
+#define USBNET_PSEUDO_YES		1
+#define USBNET_PSEUDO_BOTH		2
+	unsigned int		isPseudo;
+#endif
 #		define EVENT_TX_HALT	0
 #		define EVENT_RX_HALT	1
 #		define EVENT_RX_MEMORY	2

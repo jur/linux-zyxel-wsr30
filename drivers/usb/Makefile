@@ -10,7 +10,6 @@ obj-$(CONFIG_USB_DWC3)		+= dwc3/
 
 obj-$(CONFIG_USB_MON)		+= mon/
 
-obj-$(CONFIG_PCI)		+= host/
 obj-$(CONFIG_USB_EHCI_HCD)	+= host/
 obj-$(CONFIG_USB_ISP116X_HCD)	+= host/
 obj-$(CONFIG_USB_OHCI_HCD)	+= host/
@@ -54,5 +53,7 @@ obj-$(CONFIG_USB_MUSB_HDRC)	+= musb/
 obj-$(CONFIG_USB_CHIPIDEA)	+= chipidea/
 obj-$(CONFIG_USB_RENESAS_USBHS)	+= renesas_usbhs/
 obj-$(CONFIG_USB_GADGET)	+= gadget/
+obj-$(CONFIG_DWC_OTG_266A)	+= dwc_otg/dwc_otg_266a/
+obj-$(CONFIG_DWC_OTG_310A)	+= dwc_otg/dwc_otg_310a/
 
 obj-$(CONFIG_USB_COMMON)	+= usb-common.o

@@ -1,5 +1,6 @@
 #ifndef _PERF_PERF_H
 #define _PERF_PERF_H
+#include <appconfig.h>
 
 #include <asm/unistd.h>
 
@@ -83,6 +84,7 @@
 #endif
 
 #ifdef __mips__
+#ifdef CONFIG_CPU_HAS_SYNC
 #define rmb()		asm volatile(					\
 				".set	mips2\n\t"			\
 				"sync\n\t"				\
@@ -90,6 +92,10 @@
 				: /* no output */			\
 				: /* no input */			\
 				: "memory")
+#else
+#define rmb()		asm volatile("" ::: "memory")
+#endif
+
 #define cpu_relax()	asm volatile("" ::: "memory")
 #define CPUINFO_PROC	"cpu model"
 #endif

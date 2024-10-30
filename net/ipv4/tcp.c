@@ -584,18 +584,30 @@ int tcp_ioctl(struct sock *sk, int cmd, unsigned long arg)
 }
 EXPORT_SYMBOL(tcp_ioctl);
 
+#ifndef CONFIG_RTL_SENDFILE_PATCH
 static inline void tcp_mark_push(struct tcp_sock *tp, struct sk_buff *skb)
+#else
+inline void tcp_mark_push(struct tcp_sock *tp, struct sk_buff *skb)
+#endif
 {
 	TCP_SKB_CB(skb)->tcp_flags |= TCPHDR_PSH;
 	tp->pushed_seq = tp->write_seq;
 }
 
+#ifndef CONFIG_RTL_SENDFILE_PATCH
 static inline bool forced_push(const struct tcp_sock *tp)
+#else
+inline bool forced_push(const struct tcp_sock *tp)
+#endif
 {
 	return after(tp->write_seq, tp->pushed_seq + (tp->max_window >> 1));
 }
 
+#ifndef CONFIG_RTL_SENDFILE_PATCH
 static inline void skb_entail(struct sock *sk, struct sk_buff *skb)
+#else
+inline void skb_entail(struct sock *sk, struct sk_buff *skb)
+#endif
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
@@ -618,8 +630,13 @@ static inline void tcp_mark_urg(struct tcp_sock *tp, int flags)
 		tp->snd_up = tp->write_seq;
 }
 
+#ifndef CONFIG_RTL_SENDFILE_PATCH
 static inline void tcp_push(struct sock *sk, int flags, int mss_now,
 			    int nonagle)
+#else
+inline void tcp_push(struct sock *sk, int flags, int mss_now,
+			    int nonagle)
+#endif
 {
 	if (tcp_send_head(sk)) {
 		struct tcp_sock *tp = tcp_sk(sk);
@@ -826,7 +843,11 @@ static unsigned int tcp_xmit_size_goal(struct sock *sk, u32 mss_now,
 	return max(xmit_size_goal, mss_now);
 }
 
+#ifndef CONFIG_RTL_SENDFILE_PATCH
 static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
+#else
+int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
+#endif
 {
 	int mss_now;
 
@@ -1868,6 +1889,12 @@ do_prequeue:
 			} else
 #endif
 			{
+#ifdef CONFIG_RTL_SENDFILE_PATCH
+				if (rtl_use_sendfile & 0x10) // G2NAS enhancement
+					err = skb_copy_datagram_to_kernel_iovec(skb, offset,
+							msg->msg_iov, used);
+				else
+#endif /* CONFIG_RTL_SENDFILE_PATCH */
 				err = skb_copy_datagram_iovec(skb, offset,
 						msg->msg_iov, used);
 				if (err) {
@@ -3467,4 +3494,7 @@ void __init tcp_init(void)
 	tcp_register_congestion_control(&tcp_reno);
 
 	tcp_tasklet_init();
+#ifdef CONFIG_RTL_SENDFILE_PATCH
+	rtl_tcp_ctl_init();
+#endif /* CONFIG_RTL_SENDFILE_PATCH */
 }

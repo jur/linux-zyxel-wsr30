@@ -7,6 +7,13 @@
 #define XT_EXTENSION_MAXNAMELEN 29
 #define XT_TABLE_MAXNAMELEN 32
 
+#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
+#define RTL865X_SKIP_THIS_RULE 0x8
+#define RTL865X_ESTABLISH_RULE 0x10
+#define RTL865X_MATCH_NOT_SUPPORTED 0xFFFF;
+#endif
+
+
 struct xt_entry_match {
 	union {
 		struct {

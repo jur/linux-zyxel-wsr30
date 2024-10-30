@@ -81,6 +81,10 @@
 #include <net/ip_fib.h>
 #include "fib_lookup.h"
 
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
 #define MAX_STAT_DEPTH 32
 
 #define KEYLENGTH (8*sizeof(t_key))
@@ -1262,6 +1266,10 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 			if (new_fa == NULL)
 				goto out;
 
+			#if defined(CONFIG_RTL_819X)
+			rtl_fn_hash_replace_hooks(tb, cfg, fi);
+			#endif
+
 			fi_drop = fa->fa_info;
 			new_fa->fa_tos = fa->fa_tos;
 			new_fa->fa_info = fi;
@@ -1324,6 +1332,11 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 	rt_cache_flush(cfg->fc_nlinfo.nl_net);
 	rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen, tb->tb_id,
 		  &cfg->fc_nlinfo, 0);
+	
+	#if defined(CONFIG_RTL_819X)
+	rtl_fn_hash_insert_hooks(tb, cfg, fi);
+	#endif
+
 succeeded:
 	return 0;
 
@@ -1679,6 +1692,10 @@ int fib_table_delete(struct fib_table *tb, struct fib_config *cfg)
 
 	if (!fa_to_delete)
 		return -ESRCH;
+	
+	#if defined(CONFIG_RTL_819X)
+	rtl_fn_hash_delete_hooks(tb, cfg);
+	#endif
 
 	fa = fa_to_delete;
 	rtmsg_fib(RTM_DELROUTE, htonl(key), fa, plen, tb->tb_id,
@@ -1705,7 +1722,11 @@ int fib_table_delete(struct fib_table *tb, struct fib_config *cfg)
 	return 0;
 }
 
+#if defined(CONFIG_RTL_819X)
+static int trie_flush_list(struct list_head *head, u32 tb_id, u32 key, u32 mask_plen)
+#else
 static int trie_flush_list(struct list_head *head)
+#endif
 {
 	struct fib_alias *fa, *fa_node;
 	int found = 0;
@@ -1714,6 +1735,10 @@ static int trie_flush_list(struct list_head *head)
 		struct fib_info *fi = fa->fa_info;
 
 		if (fi && (fi->fib_flags & RTNH_F_DEAD)) {
+			#if defined(CONFIG_RTL_FASTPATH_HWNAT_SUPPORT_KERNEL_3_X)
+			rtl_fib_flush_list_hooks(tb_id, key, mask_plen);
+			#endif
+
 			list_del_rcu(&fa->fa_list);
 			fib_release_info(fa->fa_info);
 			alias_free_mem_rcu(fa);
@@ -1723,7 +1748,11 @@ static int trie_flush_list(struct list_head *head)
 	return found;
 }
 
+#if defined(CONFIG_RTL_819X)
+static int trie_flush_leaf(struct leaf *l, u32 tb_id)
+#else
 static int trie_flush_leaf(struct leaf *l)
+#endif
 {
 	int found = 0;
 	struct hlist_head *lih = &l->list;
@@ -1731,7 +1760,11 @@ static int trie_flush_leaf(struct leaf *l)
 	struct leaf_info *li = NULL;
 
 	hlist_for_each_entry_safe(li, tmp, lih, hlist) {
+		#if defined(CONFIG_RTL_819X)
+		found += trie_flush_list(&li->falh, tb_id, l->key, li->mask_plen);
+		#else
 		found += trie_flush_list(&li->falh);
+		#endif
 
 		if (list_empty(&li->falh)) {
 			hlist_del_rcu(&li->hlist);
@@ -1820,8 +1853,12 @@ int fib_table_flush(struct fib_table *tb)
 	int found = 0;
 
 	for (l = trie_firstleaf(t); l; l = trie_nextleaf(l)) {
+		#if defined(CONFIG_RTL_819X)
+		found += trie_flush_leaf(l, tb->tb_id);
+		#else
 		found += trie_flush_leaf(l);
-
+		#endif
+		
 		if (ll && hlist_empty(&ll->list))
 			trie_leaf_remove(t, ll);
 		ll = l;

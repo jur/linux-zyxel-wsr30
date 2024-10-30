@@ -152,6 +152,11 @@ struct Qdisc_class_ops {
 					struct sk_buff *skb, struct tcmsg*);
 	int			(*dump_stats)(struct Qdisc *, unsigned long,
 					struct gnet_dump *);
+#if     defined(CONFIG_RTL_HW_QOS_SUPPORT)
+        /* used for hw qos */
+        int                     (*syncHwQueue)(struct net_device *);
+        int                     (*getHandleByKey)(__u32, __u32 *, struct Qdisc *);
+#endif
 };
 
 struct Qdisc_ops {
@@ -205,7 +210,10 @@ struct tcf_proto_ops {
 	/* rtnetlink specific */
 	int			(*dump)(struct tcf_proto*, unsigned long,
 					struct sk_buff *skb, struct tcmsg*);
-
+#if     defined(CONFIG_RTL_HW_QOS_SUPPORT)
+        int                     (*classifyMark)(__u32, struct tcf_proto*,
+                                        struct tcf_result *);
+#endif
 	struct module		*owner;
 };
 
@@ -678,6 +686,9 @@ static inline struct sk_buff *skb_act_clone(struct sk_buff *skb, gfp_t gfp_mask,
 }
 #endif
 
+#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
+int tc_classifyMark(__u32 mark, struct tcf_proto *tp, struct tcf_result *res);
+#endif
 struct psched_ratecfg {
 	u64	rate_bps;
 	u32	mult;

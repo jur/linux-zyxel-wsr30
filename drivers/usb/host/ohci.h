@@ -557,6 +557,9 @@ static inline struct usb_hcd *ohci_to_hcd (const struct ohci_hcd *ohci)
 static inline unsigned int _ohci_readl (const struct ohci_hcd *ohci,
 					__hc32 __iomem * regs)
 {
+#if defined(CONFIG_RTL_819X)
+			return (le32_to_cpu((*(volatile unsigned long *)(regs))));
+#else
 #ifdef CONFIG_USB_OHCI_BIG_ENDIAN_MMIO
 	return big_endian_mmio(ohci) ?
 		readl_be (regs) :
@@ -564,17 +567,22 @@ static inline unsigned int _ohci_readl (const struct ohci_hcd *ohci,
 #else
 	return readl (regs);
 #endif
+#endif
 }
 
 static inline void _ohci_writel (const struct ohci_hcd *ohci,
 				 const unsigned int val, __hc32 __iomem *regs)
 {
+#if defined(CONFIG_RTL_819X)
+			((*(volatile unsigned long *)(regs))=cpu_to_le32(val));
+#else
 #ifdef CONFIG_USB_OHCI_BIG_ENDIAN_MMIO
 	big_endian_mmio(ohci) ?
 		writel_be (val, regs) :
 		writel (val, regs);
 #else
 		writel (val, regs);
+#endif
 #endif
 }
 

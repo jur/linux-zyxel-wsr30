@@ -10,6 +10,31 @@
 #
 # Some DECstations need all possible sections of an ECOFF executable
 #
+#ifdef CONFIG_UIMAGE
+targets += vmlinux.bin.gz
+$(obj)/vmlinux.bin.gz: $(obj)/vmlinux.bin FORCE
+	$(call if_changed,gzip)
+
+targets += vmlinux.bin.lzma
+$(obj)/vmlinux.bin.lzma: $(obj)/vmlinux.bin FORCE
+	$(call if_changed,lzma)
+
+targets += vmlinux.bin.lzo
+$(obj)/vmlinux.bin.lzo: $(obj)/vmlinux.bin
+	$(call if_changed,lzo)
+
+MKIMAGE = mkimage
+targets += uImage
+quiet_cmd_uImage = MKIMAGE $@
+cmd_uImage = $(MKIMAGE) -A mips -O linux -T kernel -C lzma -a $(VMLINUX_LOAD_ADDRESS) \
+			 -e 0x$(shell $(NM) $(VMLINUX) | grep ' kernel_entry' | cut -f1 -d ' ') \
+			 -n MIPS -d $(obj)/vmlinux.bin.lzma $(obj)/uImage.lzma
+
+$(obj)/uImage: $(obj)/vmlinux.bin.lzma FORCE
+	$(call if_changed,uImage,none)
+
+#endif
+
 ifdef CONFIG_MACH_DECSTATION
   e2eflag := -a
 endif

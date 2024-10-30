@@ -108,7 +108,10 @@ MODULE_PARM_DESC (ignore_oc, "ignore bogus hardware overcurrent indications");
 /*-------------------------------------------------------------------------*/
 
 #include "ehci.h"
+//#ifdef CONFIG_USB_EHCI_PCI //modified by lynn_pu, 2014-10-30
+#if defined(CONFIG_USB_EHCI_PCI) || (defined(CONFIG_RLX)&&defined(CONFIG_PCI_HCI))
 #include "pci-quirks.h"
+#endif
 
 /*
  * The MosChip MCS9990 controller updates its microframe counter
@@ -368,6 +371,24 @@ static void ehci_shutdown(struct usb_hcd *hcd)
 	hrtimer_cancel(&ehci->hrtimer);
 }
 
+static void ehci_port_power (struct ehci_hcd *ehci, int is_on)
+{
+	unsigned port;
+
+	if (!HCS_PPC (ehci->hcs_params))
+		return;
+
+	ehci_dbg (ehci, "...power%s ports...\n", is_on ? "up" : "down");
+	for (port = HCS_N_PORTS (ehci->hcs_params); port > 0; )
+		(void) ehci_hub_control(ehci_to_hcd(ehci),
+				is_on ? SetPortFeature : ClearPortFeature,
+				USB_PORT_FEAT_POWER,
+				port--, NULL, 0);
+	/* Flush those writes */
+	ehci_readl(ehci, &ehci->regs->command);
+	msleep(20);
+}
+
 /*-------------------------------------------------------------------------*/
 
 /*
@@ -434,8 +455,10 @@ static void ehci_stop (struct usb_hcd *hcd)
 	spin_unlock_irq (&ehci->lock);
 	ehci_mem_cleanup (ehci);
 
+#ifdef CONFIG_USB_EHCI_PCI
 	if (ehci->amd_pll_fix == 1)
 		usb_amd_dev_put();
+#endif
 
 #ifdef	EHCI_STATS
 	ehci_dbg(ehci, "irq normal %ld err %ld iaa %ld (lost %ld)\n",
@@ -1289,6 +1312,11 @@ MODULE_LICENSE ("GPL");
 #ifdef CONFIG_MIPS_SEAD3
 #include "ehci-sead3.c"
 #define	PLATFORM_DRIVER		ehci_hcd_sead3_driver
+#endif
+
+#ifdef CONFIG_RTL_819X
+#include "ehci-rtl819x.c"
+#define PLATFORM_DRIVER     ehci_rtl819x_driver
 #endif
 
 static int __init ehci_hcd_init(void)

@@ -685,6 +685,10 @@ static int pppoe_connect(struct socket *sock, struct sockaddr *uservaddr,
 				    po->pppoe_pa.remote, po->pppoe_ifindex);
 			goto err_put;
 		}
+		
+#if defined (CONFIG_RTL_PPPOE_HWACC) || defined(CONFIG_RTL_FAST_PPPOE)
+		ppp_channel_pppoe(&po->chan);
+#endif
 
 		sk->sk_state = PPPOX_CONNECTED;
 	}

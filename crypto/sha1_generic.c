@@ -33,6 +33,10 @@ static int sha1_init(struct shash_desc *desc)
 		.state = { SHA1_H0, SHA1_H1, SHA1_H2, SHA1_H3, SHA1_H4 },
 	};
 
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	rtl_hash_init_ctx(crypto_shash_tfm(desc->tfm), &sctx->rtl_ctx);
+	#endif
+	
 	return 0;
 }
 
@@ -47,7 +51,16 @@ int crypto_sha1_update(struct shash_desc *desc, const u8 *data,
 	sctx->count += len;
 	done = 0;
 	src = data;
-
+	
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	if (len <= SHA1_BLOCK_SIZE)
+	{		
+		memcpy((char *)sctx->buffer, data, len);
+	}
+	rtl_hash_update(&sctx->rtl_ctx, (u8 *) data, len);
+	return 0;
+	#endif
+	
 	if ((partial + len) >= SHA1_BLOCK_SIZE) {
 		u32 temp[SHA_WORKSPACE_WORDS];
 
@@ -73,10 +86,29 @@ int crypto_sha1_update(struct shash_desc *desc, const u8 *data,
 }
 EXPORT_SYMBOL(crypto_sha1_update);
 
+#if 0//def CONFIG_CRYPTO_DEV_REALTEK
+static int sha1_digest(struct shash_desc *desc, const u8 *data,
+	unsigned int len, u8 *out)
+{
+	struct sha1_state *sctx = shash_desc_ctx(desc);
+	printk("%s %d \n", __FUNCTION__, __LINE__);
+	
+#if 1
+	return rtl_hash_digest(&sctx->rtl_ctx, (u8 *) data, len, out);
+#else
+	return 0;
+#endif
+}
+#endif
 
 /* Add padding and return the message digest. */
 static int sha1_final(struct shash_desc *desc, u8 *out)
 {
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+	struct sha1_state *sctx = shash_desc_ctx(desc);
+
+	return rtl_hash_final(&sctx->rtl_ctx, out);
+#else
 	struct sha1_state *sctx = shash_desc_ctx(desc);
 	__be32 *dst = (__be32 *)out;
 	u32 i, index, padlen;
@@ -101,6 +133,7 @@ static int sha1_final(struct shash_desc *desc, u8 *out)
 	memset(sctx, 0, sizeof *sctx);
 
 	return 0;
+#endif
 }
 
 static int sha1_export(struct shash_desc *desc, void *out)
@@ -116,6 +149,11 @@ static int sha1_import(struct shash_desc *desc, const void *in)
 	struct sha1_state *sctx = shash_desc_ctx(desc);
 
 	memcpy(sctx, in, sizeof(*sctx));
+		
+#ifdef CONFIG_CRYPTO_DEV_REALTEK
+		sctx->rtl_ctx.length = 0;
+		rtl_hash_update(&sctx->rtl_ctx, (u8 *) sctx->buffer, SHA1_BLOCK_SIZE);
+#endif
 	return 0;
 }
 
@@ -124,6 +162,9 @@ static struct shash_alg alg = {
 	.init		=	sha1_init,
 	.update		=	crypto_sha1_update,
 	.final		=	sha1_final,
+#if 0//def CONFIG_CRYPTO_DEV_REALTEK
+	.digest		=	sha1_digest,
+#endif
 	.export		=	sha1_export,
 	.import		=	sha1_import,
 	.descsize	=	sizeof(struct sha1_state),

@@ -38,6 +38,9 @@ int __initdata rd_doload;	/* 1 = load RAM disk, 0 = don't load */
 int root_mountflags = MS_RDONLY | MS_SILENT;
 static char * __initdata root_device_name;
 static char __initdata saved_root_name[64];
+#if defined(CONFIG_RTL_FLASH_DUAL_IMAGE_ENABLE)
+static char __initdata saved_root_name2[64];
+#endif
 static int root_wait;
 
 dev_t ROOT_DEV;
@@ -289,6 +292,16 @@ static int __init root_dev_setup(char *line)
 }
 
 __setup("root=", root_dev_setup);
+
+#if defined(CONFIG_RTL_FLASH_DUAL_IMAGE_ENABLE)
+static int __init root2_dev_setup(char *line)
+{
+	strlcpy(saved_root_name2, line, sizeof(saved_root_name2));
+	return 1;
+}
+
+__setup("root2=", root2_dev_setup);
+#endif
 
 static int __init rootwait_setup(char *str)
 {
@@ -559,6 +572,19 @@ void __init prepare_namespace(void)
 			mount_block_root(root_device_name, root_mountflags);
 			goto out;
 		}
+#ifdef CONFIG_RTL_FLASH_DUAL_IMAGE_ENABLE
+		extern int is_bank2_root();  		//extern from rtl_gpio.c
+		if(is_bank2_root()){				//assume bank1 root is mtdblock1 , bank2's root is mtdblock3
+			if(saved_root_name2[0])
+				root_device_name = saved_root_name2;
+			else
+#ifndef CONFIG_MTD_NAND
+				strcpy(root_device_name,"/dev/mtdblock3");		
+#else
+				strcpy(root_device_name,"/dev/mtdblock6");		
+#endif
+		}
+#endif
 		ROOT_DEV = name_to_dev_t(root_device_name);
 		if (strncmp(root_device_name, "/dev/", 5) == 0)
 			root_device_name += 5;

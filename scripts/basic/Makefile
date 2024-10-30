@@ -8,6 +8,7 @@
 # ---------------------------------------------------------------------------
 # fixdep: 	 Used to generate dependency information during build process
 
+quiet=silent_
 hostprogs-y	:= fixdep
 always		:= $(hostprogs-y)
 

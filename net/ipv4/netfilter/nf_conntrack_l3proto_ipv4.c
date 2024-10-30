@@ -220,6 +220,12 @@ static struct nf_hook_ops ipv4_conntrack_ops[] __read_mostly = {
 };
 
 #if defined(CONFIG_SYSCTL) && defined(CONFIG_NF_CONNTRACK_PROC_COMPAT)
+
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+extern int conntrack_dointvec(ctl_table *table, int write, struct file *filp,
+		     void *buffer, size_t *lenp, loff_t *ppos);
+#endif
+
 static int log_invalid_proto_min = 0;
 static int log_invalid_proto_max = 255;
 
@@ -228,7 +234,11 @@ static ctl_table ip_ct_sysctl_table[] = {
 		.procname	= "ip_conntrack_max",
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+		.proc_handler	= &conntrack_dointvec,
+#else
 		.proc_handler	= proc_dointvec,
+#endif
 	},
 	{
 		.procname	= "ip_conntrack_count",

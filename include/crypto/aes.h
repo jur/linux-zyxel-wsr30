@@ -24,7 +24,10 @@
 struct crypto_aes_ctx {
 	u32 key_enc[AES_MAX_KEYLENGTH_U32];
 	u32 key_dec[AES_MAX_KEYLENGTH_U32];
-	u32 key_length;
+	u32 key_length;	
+	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
+	u8  rtl_key[AES_MAX_KEY_SIZE];
+	#endif
 };
 
 extern const u32 crypto_ft_tab[4][256];

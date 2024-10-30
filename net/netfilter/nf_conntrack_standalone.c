@@ -33,6 +33,10 @@
 #include <net/netfilter/nf_conntrack_timestamp.h>
 #include <linux/rculist_nulls.h>
 
+#if defined(CONFIG_RTL_819X)
+#include <net/rtl/features/rtl_ps_hooks.h>
+#endif
+
 MODULE_LICENSE("GPL");
 
 #ifdef CONFIG_NF_CONNTRACK_PROCFS
@@ -192,6 +196,12 @@ static int ct_seq_show(struct seq_file *s, void *v)
 	NF_CT_ASSERT(l4proto);
 
 	ret = -ENOSPC;
+	
+#if defined(CONFIG_RTL_819X)
+	if(rtl_ct_seq_show_hooks(s,ct)==RTL_PS_HOOKS_BREAK)
+		goto release;		
+#endif
+
 	if (seq_printf(s, "%-8s %u %-8s %u %ld ",
 		       l3proto->name, nf_ct_l3num(ct),
 		       l4proto->name, nf_ct_protonum(ct),
@@ -227,6 +237,12 @@ static int ct_seq_show(struct seq_file *s, void *v)
 #if defined(CONFIG_NF_CONNTRACK_MARK)
 	if (seq_printf(s, "mark=%u ", ct->mark))
 		goto release;
+#endif
+
+#if defined(CONFIG_NETFILTER_XT_MATCH_LAYER7) || defined(CONFIG_NETFILTER_XT_MATCH_LAYER7_MODULE)
+	if(ct->layer7.app_proto &&
+           seq_printf(s, "l7proto=%s ", ct->layer7.app_proto))
+		return -ENOSPC;
 #endif
 
 	if (ct_show_secctx(s, ct))
@@ -408,7 +424,55 @@ static int log_invalid_proto_max = 255;
 
 static struct ctl_table_header *nf_ct_netfilter_header;
 
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+extern unsigned int conntrack_min;
+extern unsigned int conntrack_max;
+extern unsigned int prot_limit[];
+
+extern int conntrack_dointvec(ctl_table *table, int write, struct file *filp,
+		     void *buffer, size_t *lenp, loff_t *ppos);
+extern int conntrack_dointvec_minmax(ctl_table *table, int write, struct file *filp,
+		     void *buffer, size_t *lenp, loff_t *ppos);
+#endif 
+
+#if defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+static unsigned int nf_conntrack_reserved_num = 1024;
+static int conntrack_dointvec_819x(ctl_table *table, int write, 
+		     void *buffer, size_t *lenp, loff_t *ppos) 
+{
+	int err;
+
+	err = proc_dointvec(table, write,  buffer, lenp, ppos);
+	if (err != 0)
+		return err;
+
+	rtl_nf_conntrack_threshold = (nf_conntrack_max * 4)/5;
+	if((nf_conntrack_max- rtl_nf_conntrack_threshold) > nf_conntrack_reserved_num)
+		rtl_nf_conntrack_threshold = nf_conntrack_max - nf_conntrack_reserved_num;
+
+	return 0;
+}
+#endif
+
+
 static ctl_table nf_ct_sysctl_table[] = {
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	{
+		.procname	= "nf_conntrack_max",
+		.data		= &nf_conntrack_max,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &conntrack_dointvec,
+	},
+#elif defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+    {
+		.procname	= "nf_conntrack_max",
+		.data		= &nf_conntrack_max,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &conntrack_dointvec_819x,
+    },
+#else
 	{
 		.procname	= "nf_conntrack_max",
 		.data		= &nf_conntrack_max,
@@ -416,6 +480,7 @@ static ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#endif
 	{
 		.procname	= "nf_conntrack_count",
 		.data		= &init_net.ct.count,
@@ -453,7 +518,37 @@ static ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
-	{ }
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	{ 
+		.procname	= "nf_conntrack_tcp",
+		.data		= &prot_limit[PROT_TCP],
+		.maxlen		= sizeof(prot_limit[PROT_TCP]), 
+		.mode		= 0644,
+		.proc_handler	= &conntrack_dointvec_minmax,
+		.extra1		= &conntrack_min,
+		.extra2		= &conntrack_max,
+	},
+	{ 
+		.procname	= "nf_conntrack_udp",
+		.data		= &prot_limit[PROT_UDP],
+		.maxlen		= sizeof(prot_limit[PROT_UDP]), 
+		.mode		= 0644,
+		.proc_handler	= &conntrack_dointvec_minmax,
+		.extra1		= &conntrack_min,
+		.extra2		= &conntrack_max,
+	},
+#endif
+#if defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+	{
+		.procname	= "nf_conntrack_reserved_num",
+		.data		= &nf_conntrack_reserved_num,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+       },
+#endif
+
+	{}
 };
 
 #define NET_NF_CONNTRACK_MAX 2089
@@ -464,7 +559,13 @@ static ctl_table nf_ct_netfilter_table[] = {
 		.data		= &nf_conntrack_max,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
+#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+		.proc_handler	= &conntrack_dointvec,
+#elif defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+		.proc_handler	= &conntrack_dointvec_819x,
+#else
 		.proc_handler	= proc_dointvec,
+#endif
 	},
 	{ }
 };
